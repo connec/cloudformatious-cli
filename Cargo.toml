@@ -1,0 +1,28 @@
+[package]
+name = "cfn-deploy"
+version = "0.1.0"
+authors = ["Chris Connelly <chris@connec.co.uk>"]
+edition = "2018"
+
+[profile.dev]
+panic = "abort"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+async-stream = "0.3.0"
+chrono = "0.4.19"
+http = "0.2.3"
+indexmap = "1.6.2"
+pin-utils = "0.1.0"
+rusoto_cloudformation = "0.46.0"
+rusoto_core = "0.46.0"
+rusoto_credential = "0.46.0"
+termion = "1.5.6"
+textwrap = "0.13.4"
+tokio = "1.4.0"
+tokio-stream = "0.1.5"
+tui = "0.14.0"
+
+[dev-dependencies]
+bytes = "1.0.1"
