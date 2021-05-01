@@ -1,6 +1,6 @@
-# `cfn-deploy`
+# `cloudformatious-cli`
 
-An (extremely WIP and hypothetically) better `aws cloudformation deploy`.
+A CloudFormation CLI that won't make you cry.
 
 ```
 cloudformatious-cli
