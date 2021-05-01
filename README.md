@@ -2,6 +2,8 @@
 
 A CloudFormation CLI that won't make you cry.
 
+![Sample output of a stack that failed to create.](sample-output.png)
+
 ```
 cloudformatious-cli
 A CloudFormation CLI that won't make you cry.
