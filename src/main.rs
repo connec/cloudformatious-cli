@@ -1,525 +1,561 @@
-use std::{convert::TryInto, error::Error, fmt, fs, io, time::Duration};
+use std::{
+    collections::HashMap,
+    convert::{TryFrom, TryInto},
+    env,
+    ffi::OsStr,
+    fmt, fs,
+    path::PathBuf,
+    process,
+    str::FromStr,
+    time::Duration,
+};
 
-use indexmap::IndexMap;
-use rusoto_cloudformation::CloudFormationClient;
-use rusoto_core::{request::TlsError, HttpClient, Region};
+use clap::Clap;
+use cloudformatious::{
+    ApplyStackError, ApplyStackInput, Capability, CloudFormatious, DeleteStackError,
+    DeleteStackInput, Parameter, StackEvent, Status, StatusSentiment, TemplateSource,
+};
+use colored::{ColoredString, Colorize};
+use futures_util::{Stream, StreamExt};
+use rusoto_cloudformation::{CloudFormationClient, Tag};
+use rusoto_core::{HttpClient, Region};
 use rusoto_credential::{
-    AutoRefreshingProvider, ChainProvider, CredentialsError, ProvideAwsCredentials,
-};
-use termion::{event::Key, input::TermRead, raw::IntoRawMode, screen::AlternateScreen};
-use tokio_stream::StreamExt;
-use tui::{
-    backend::TermionBackend,
-    layout::{Constraint, Direction, Layout},
-    style::{Color, Style},
-    text::{Span, Spans, Text},
-    widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState},
-    Terminal,
+    AutoRefreshingProvider, ChainProvider, ProfileProvider, ProvideAwsCredentials,
 };
 
-use cfn_deploy::{
-    CloudFormationExt, DeployInput, ResourceAction, ResourceChange, ResourceStatus, StackEvent,
-};
+const MISSING_REGION: &str = "Unable to determine AWS region.
+You can set it in your profile, assign `AWS_REGION`, or supply `--region`.";
 
-#[tokio::main]
-async fn main() {
-    let stderr = io::stderr().into_raw_mode().unwrap();
-    let stderr = AlternateScreen::from(stderr);
-    let backend = TermionBackend::new(stderr);
-    let mut terminal = Terminal::new(backend).unwrap();
+/// A CloudFormation CLI that won't make you cry.
+///
+/// All commands will look for AWS configuration in the usual places. See AWS CLI documentation for
+/// more information: https://docs.aws.amazon.com/cli/latest/topic/config-vars.html
+///
+/// Use `cloudformatious <command> --help` to get more information about individual commands.
+#[derive(Clap, Debug)]
+struct Args {
+    /// Disable informational output to STDERR.
+    #[clap(long)]
+    quiet: bool,
 
-    {
-        let raw_handle = io::stderr().into_raw_mode().unwrap();
-        let default_hook = std::panic::take_hook();
-        std::panic::set_hook(Box::new(move |info| {
-            raw_handle.suspend_raw_mode().unwrap();
-            default_hook(info);
-        }));
-    }
+    /// The region to use. Overrides config/env settings.
+    #[clap(long, env = "AWS_REGION")]
+    region: Option<Region>,
 
-    match try_main(&mut terminal)
-        .await
-        .map_err(|error| error.downcast::<cfn_deploy::Error>().map(|error| *error))
-    {
-        Ok(_) => {
-            let stdin = io::stdin();
-            for key in stdin.keys() {
-                if let Key::Char('q') = key.unwrap() {
-                    break;
-                }
-            }
-            drop(terminal);
-
-            println!("Success!");
-        }
-        Err(Ok(cfn_deploy::Error::ExecuteChangeSetFailed {
-            change_set,
-            stack_error_event,
-            resource_error_events,
-        })) => {
-            drop(terminal);
-
-            eprintln!(
-                "\x1b[31mError:\x1b[0m failed to {} stack {}\n",
-                change_set.effect.to_string().to_lowercase(),
-                change_set.stack_name
-            );
-
-            let stack_error_event = FormattedStackEvent::new_unwrapped(&stack_error_event);
-            eprintln!("Stack error event:\n");
-            eprintln!("- {}\n", stack_error_event);
-
-            eprintln!("Resource error events:\n");
-            for event in resource_error_events {
-                let event = FormattedStackEvent::new_unwrapped(&event);
-                eprintln!("- {}", event);
-            }
-        }
-        Err(Ok(error)) => {
-            drop(terminal);
-
-            eprintln!("{}", error);
-            std::process::exit(1);
-        }
-        Err(Err(error)) => {
-            drop(terminal);
-
-            eprintln!("{}", error);
-            std::process::exit(1);
-        }
-    }
+    #[clap(subcommand)]
+    command: Command,
 }
 
-struct State {
-    stack_name: String,
-    stack_state: Option<StackState>,
-    events: Vec<StackEvent>,
+#[derive(Clap, Debug)]
+enum Command {
+    ApplyStack(ApplyStackArgs),
+    DeleteStack(DeleteStackArgs),
 }
 
-struct StackState {
-    stack_id: String,
-    last_event: Option<StackEvent>,
-    resource_states: IndexMap<String, ResourceState>,
+/// Apply a CloudFormation template.
+///
+/// This performs an update or create operation for a target stack. It's not an error for there
+/// to be no changes. The command runs until the stack settles.
+///
+/// # Output
+///
+/// Stack events are printed to STDERR as the operation proceeds, unless disabled with `--quiet`.
+///
+/// If the stack operation succeeds and there are no resource errors, then the stack's outputs
+/// are printed to STDOUT as JSON.
+///
+/// If the stack operation succeeds and there *are* resource errors, then details of the errors
+/// are printed to STDERR and the stack's outputs are printed to STDOUT as JSON.
+///
+/// If the stack operation fails, then details of the error(s) are printed to STDERR.
+///
+/// # Exit code
+///
+/// If the stack operation succeeds and there are no resource errors, then the CLI will exit
+/// successfully with code 0.
+///
+/// If the operation succeeds but there *are* resource errors, then the exit code is 3.
+///
+/// If the operation fails because the stack settled in an error state, then exit code is 4.
+///
+/// If the operation fails for any other reason, then the exit code is 1.
+#[derive(Clap, Debug)]
+struct ApplyStackArgs {
+    /// Capabilities to explicitly acknowledge.
+    #[clap(long)]
+    capabilities: Vec<CapabilityArg>,
+
+    /// A unique identifier for this `apply_stack` operation.
+    #[clap(long)]
+    client_request_token: Option<String>,
+
+    /// The Simple Notification Service (SNS) topic ARNs to publish stack related events.
+    #[clap(long)]
+    notification_arns: Vec<String>,
+
+    /// A list of input parameters for the stack.
+    ///
+    /// Parameters should be supplied as `key=value` strings.
+    #[clap(long)]
+    parameters: Vec<ParameterArg>,
+
+    /// The template resource types that you have permissions to work with for this `apply_stack`
+    /// operation, such as `AWS::EC2::Instance`, `AWS::EC2::*`, or `Custom::MyCustomInstance`.
+    #[clap(long)]
+    resource_types: Vec<String>,
+
+    /// The Amazon Resource Name (ARN) of an AWS Identity And Access Management (IAM) role that AWS
+    /// CloudFormation assumes to apply the stack.
+    #[clap(long)]
+    role_arn: Option<String>,
+
+    /// The name that is associated with the stack.
+    ///
+    /// If this isn't set explicitly then the file name of the `template_path` is used as the stack
+    /// name. E.g. if `template_path` is `deployment/cloudformation/my-stack.yaml` then the default
+    /// stack name would be `my-stack`.
+    #[clap(long)]
+    stack_name: Option<String>,
+
+    /// Key-value pairs to associate with this stack.
+    ///
+    /// Tags should be supplied either as `key=value` strings and/or as a JSON object (e.g.
+    /// `{"key1": "value1", "key2": "value2"}). JSON is tried first.
+    #[clap(long)]
+    tags: Vec<TagArg>,
+
+    /// Path to the template to be applied.
+    template_path: PathBuf,
 }
 
-struct ResourceState {
-    plan: ResourceChange,
-    last_event: Option<StackEvent>,
-}
+impl TryFrom<ApplyStackArgs> for ApplyStackInput {
+    type Error = Error;
+    fn try_from(args: ApplyStackArgs) -> Result<Self, Self::Error> {
+        let template_path = args.template_path;
 
-impl ResourceState {
-    fn to_row(&self, reason_width: u16) -> Row {
-        let (resource_status, resource_status_reason, height) = self
-            .last_event
-            .as_ref()
-            .map(|event| {
-                let event = FormattedStackEvent::new_wrapped(event, reason_width);
-                (
-                    event.resource_status,
-                    event.resource_status_reason,
-                    event.height,
-                )
-            })
-            .unwrap_or_else(|| {
-                (
-                    (Text::from(""), FormatColor::Default),
-                    (Text::from(""), FormatColor::Default),
-                    1,
-                )
-            });
-
-        Row::new(vec![
-            Cell::from(self.plan.action.to_string()).style(Style::default().fg(
-                match self.plan.action {
-                    ResourceAction::Add => Color::LightGreen,
-                    ResourceAction::Modify => Color::LightYellow,
-                    ResourceAction::Remove => Color::LightRed,
+        Ok(ApplyStackInput {
+            capabilities: args.capabilities.into_iter().map(Into::into).collect(),
+            client_request_token: args.client_request_token,
+            notification_arns: args.notification_arns,
+            parameters: args.parameters.into_iter().map(Into::into).collect(),
+            resource_types: if args.resource_types.is_empty() {
+                None
+            } else {
+                Some(args.resource_types)
+            },
+            role_arn: args.role_arn,
+            stack_name: args.stack_name.unwrap_or_else(|| {
+                template_path
+                    .file_stem()
+                    .unwrap_or_else(|| OsStr::new(""))
+                    .to_string_lossy()
+                    .to_string()
+            }),
+            tags: args.tags.into_iter().flatten().collect(),
+            template_source: TemplateSource::inline(fs::read_to_string(&template_path).map_err(
+                |error| {
+                    Error::other(format!(
+                        "Invalid template path {:?}: {}",
+                        template_path, error
+                    ))
                 },
-            )),
-            Cell::from(self.plan.resource_type.as_str()),
-            Cell::from(self.plan.logical_resource_id.as_str()),
-            Cell::from(resource_status.0).style(resource_status.1.style()),
-            Cell::from(resource_status_reason.0).style(resource_status_reason.1.style()),
-        ])
-        .height(height)
-    }
-}
-
-impl State {
-    fn render<B: tui::backend::Backend>(&self, terminal: &mut Terminal<B>) -> io::Result<()> {
-        terminal.draw(|f| {
-            let wrapper = Block::default().borders(Borders::ALL);
-            let inner_rect = wrapper.inner(f.size());
-            let layout = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-                .split(f.size());
-            match &self.stack_state {
-                None => {
-                    let wrapper = wrapper.title(Spans::from(vec![
-                        Span::raw(format!("cfn-deploy – {} – ", self.stack_name)),
-                        Span::styled("PENDING", Style::default().fg(Color::Yellow)),
-                    ]));
-                    let content = Paragraph::new("Starting deployment...").block(wrapper);
-                    f.render_widget(content, layout[0]);
-                }
-                Some(stack_state) => {
-                    let wrapper = wrapper.title(Spans::from(vec![
-                        Span::raw(format!("cfn-deploy – {} – ", self.stack_name)),
-                        stack_state
-                            .last_event
-                            .as_ref()
-                            .map(|event| {
-                                Span::styled(
-                                    event.resource_status.to_string(),
-                                    colorize_status(&event.resource_status).style(),
-                                )
-                            })
-                            .unwrap_or_else(|| {
-                                Span::styled("PENDING", Style::default().fg(Color::Yellow))
-                            }),
-                    ]));
-                    let table_constraints = [
-                        Constraint::Length(6),
-                        Constraint::Percentage(20),
-                        Constraint::Percentage(20),
-                        Constraint::Length(20),
-                        Constraint::Min(0),
-                    ];
-                    let table_layout = Layout::default()
-                        .direction(Direction::Horizontal)
-                        .constraints(&table_constraints[..])
-                        .split(inner_rect);
-                    let reason_width = table_layout[4].width;
-                    let table = Table::new(
-                        stack_state
-                            .resource_states
-                            .values()
-                            .map(|state| state.to_row(reason_width)),
-                    )
-                    .header(
-                        Row::new(vec![
-                            Cell::from("Action").style(Style::default().fg(Color::Gray)),
-                            Cell::from("Resource type").style(Style::default().fg(Color::Gray)),
-                            Cell::from("Resource").style(Style::default().fg(Color::Gray)),
-                            Cell::from("Status").style(Style::default().fg(Color::Gray)),
-                            Cell::from("Status reason").style(Style::default().fg(Color::Gray)),
-                        ])
-                        .bottom_margin(1),
-                    )
-                    .block(wrapper)
-                    .widths(&table_constraints);
-                    f.render_widget(table, layout[0]);
-                }
-            }
-
-            let events = Block::default().borders(Borders::ALL).title("Events");
-            let table_constraints = [
-                Constraint::Length(29),
-                Constraint::Percentage(20),
-                Constraint::Percentage(20),
-                Constraint::Length(20),
-                Constraint::Min(0),
-            ];
-            let table_layout = Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints(&table_constraints[..])
-                .split(inner_rect);
-            let reason_width = table_layout[4].width;
-            let table = Table::new(
-                self.events
-                    .iter()
-                    .map(|event| FormattedStackEvent::new_wrapped(event, reason_width).into_row()),
-            )
-            .block(events)
-            .widths(&table_constraints);
-            f.render_stateful_widget(table, layout[1], &mut {
-                let mut table_state = TableState::default();
-                table_state.select(Some(self.events.len()));
-                table_state
-            });
+            )?),
         })
     }
 }
 
-enum FormatColor {
-    Default,
-    Red,
-    Green,
-    Yellow,
+/// Newtype for parsing capabilities.
+// TODO: use impl Deserialize upstream and use `Capability` directly.
+#[derive(Debug)]
+struct CapabilityArg(Capability);
+
+impl FromStr for CapabilityArg {
+    type Err = InvalidCapability;
+    fn from_str(capability: &str) -> Result<Self, Self::Err> {
+        let capability = match capability {
+            "CAPABILITY_IAM" => Capability::Iam,
+            "CAPABILITY_NAMED_IAM" => Capability::NamedIam,
+            "CAPABILITY_AUTO_EXPAND" => Capability::AutoExpand,
+            _ => return Err(InvalidCapability(capability.to_string())),
+        };
+        Ok(Self(capability))
+    }
 }
 
-impl FormatColor {
-    fn style(&self) -> Style {
+impl From<CapabilityArg> for Capability {
+    fn from(arg: CapabilityArg) -> Self {
+        arg.0
+    }
+}
+
+#[derive(Debug)]
+struct InvalidCapability(String);
+
+impl fmt::Display for InvalidCapability {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "invalid capability `{}`, should be one of `{}`, `{}`, or `{}`",
+            self.0,
+            Capability::Iam,
+            Capability::NamedIam,
+            Capability::AutoExpand
+        )
+    }
+}
+
+impl std::error::Error for InvalidCapability {}
+
+/// Newtype for parsing parameters.
+#[derive(Debug)]
+struct ParameterArg(Parameter);
+
+impl FromStr for ParameterArg {
+    type Err = InvalidParameter;
+    fn from_str(parameter: &str) -> Result<Self, Self::Err> {
+        let kv: Vec<_> = parameter.splitn(2, '=').collect();
+        let [key, value]: [_; 2] = kv
+            .try_into()
+            .map_err(|_| InvalidParameter(parameter.to_string()))?;
+        Ok(Self(Parameter {
+            key: key.to_string(),
+            value: value.to_string(),
+        }))
+    }
+}
+
+impl From<ParameterArg> for Parameter {
+    fn from(arg: ParameterArg) -> Self {
+        arg.0
+    }
+}
+
+#[derive(Debug)]
+struct InvalidParameter(String);
+
+impl fmt::Display for InvalidParameter {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "invalid parameter `{}`, must be in the form `key=value`",
+            self.0
+        )
+    }
+}
+
+impl std::error::Error for InvalidParameter {}
+
+/// Newtype for parsing tags.
+#[derive(Debug)]
+enum TagArg {
+    KeyValue(Tag),
+    Json(Vec<Tag>),
+}
+
+impl FromStr for TagArg {
+    type Err = InvalidTag;
+    fn from_str(tag: &str) -> Result<Self, Self::Err> {
+        // First try to parse as JSON
+        let tags: Result<HashMap<String, String>, _> = serde_json::from_str(tag);
+        if let Ok(tags) = tags {
+            return Ok(TagArg::Json(
+                tags.into_iter()
+                    .map(|(key, value)| Tag { key, value })
+                    .collect(),
+            ));
+        }
+
+        let kv: Vec<_> = tag.splitn(2, '=').collect();
+        let [key, value]: [_; 2] = kv.try_into().map_err(|_| InvalidTag(tag.to_string()))?;
+        Ok(Self::KeyValue(Tag {
+            key: key.to_string(),
+            value: value.to_string(),
+        }))
+    }
+}
+
+impl IntoIterator for TagArg {
+    type Item = Tag;
+    type IntoIter = std::vec::IntoIter<Self::Item>;
+    fn into_iter(self) -> Self::IntoIter {
         match self {
-            Self::Default => Style::reset(),
-            color => Style::default().fg(match color {
-                Self::Default => unreachable!(),
-                Self::Red => Color::Red,
-                Self::Green => Color::Green,
-                Self::Yellow => Color::Yellow,
-            }),
+            Self::KeyValue(tag) => vec![tag].into_iter(),
+            Self::Json(tags) => tags.into_iter(),
         }
     }
 }
 
-impl fmt::Display for FormatColor {
+#[derive(Debug)]
+struct InvalidTag(String);
+
+impl fmt::Display for InvalidTag {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "\x1b[{}m",
-            match self {
-                Self::Default => 0,
-                Self::Red => 31,
-                Self::Green => 32,
-                Self::Yellow => 33,
-            }
+            "invalid tag `{}`, must be in the form `key=value` or a JSON object",
+            self.0
         )
     }
 }
 
-struct FormattedStackEvent<'a> {
-    timestamp: (Text<'a>, FormatColor),
-    resource_type: (Text<'a>, FormatColor),
-    logical_resource_id: (Text<'a>, FormatColor),
-    resource_status: (Text<'a>, FormatColor),
-    resource_status_reason: (Text<'a>, FormatColor),
-    height: u16,
+impl std::error::Error for InvalidTag {}
+
+/// Delete a CloudFormation stack.
+///
+/// # Output
+///
+/// Stack events are printed to STDERR as the operation proceeds, unless disable with `--quiet`.
+///
+/// If the stack is deleted successfully and there are no resource errors, or if no stack
+/// existed in the first place, a confirmation message is printed to STDERR.
+///
+/// If the stack is deleted successfully and there *are* resource errors, then details of the
+/// errors are printed to STDERR.
+///
+/// If the stack deletion fails, then details of the error(s) are printed to STDERR.
+///
+/// # Exit code
+///
+/// If the stack is deleted successfully and there are no resource errors, or if no stack
+/// existed in the first place, then the CLI will exit successfully with code 0.
+///
+/// If the stack is deleted successfully but there *are* resource errors, then the exit code is
+/// 3.
+///
+/// If the stack deletion fails because the stack settled in an error state, then exit code is
+/// 4.
+///
+/// If the deletion fails for any other reason, then the exit code is 1.
+#[derive(Clap, Debug)]
+struct DeleteStackArgs {
+    /// A unique identifier for this `delete_stack` operation.
+    #[clap(long)]
+    client_request_token: Option<String>,
+
+    /// For stacks in the `DELETE_FAILED` state, a list of resource logical IDs that are associated
+    /// with the resources you want to retain. During deletion, AWS CloudFormation deletes the stack
+    /// but does not delete the retained resources.
+    #[clap(long)]
+    retain_resources: Vec<String>,
+
+    /// The Amazon Resource Name (ARN) of an AWS Identity And Access Management (IAM) role that AWS
+    /// CloudFormation assumes to delete the stack.
+    #[clap(long)]
+    role_arn: Option<String>,
+
+    /// The name of the stack to delete.
+    #[clap(long)]
+    stack_name: Option<String>,
+
+    /// The path to the template whose associated stack will be deleted.
+    ///
+    /// The stack to delete is determined from the file name of `template_path`. E.g. if
+    /// `template_path` is `deployment/cloudformation/my-stack.yaml` then the default `my-stack`
+    /// will be deleted.
+    #[clap(required_unless_present = "stack-name")]
+    template_path: Option<PathBuf>,
 }
 
-impl<'a> FormattedStackEvent<'a> {
-    fn new_unwrapped(event: &'a StackEvent) -> Self {
-        Self {
-            timestamp: (
-                Text::from(event.timestamp.to_rfc3339()),
-                FormatColor::Default,
-            ),
-            resource_type: (
-                Text::from(event.resource_type.as_str()),
-                FormatColor::Default,
-            ),
-            logical_resource_id: (
-                Text::from(event.logical_resource_id.as_str()),
-                FormatColor::Default,
-            ),
-            resource_status: (
-                Text::from(event.resource_status.to_string()),
-                colorize_status(&event.resource_status),
-            ),
-            resource_status_reason: (
-                Text::from(
-                    event
-                        .resource_status_reason
-                        .as_deref()
-                        .unwrap_or("Unknown reason (debug via AWS Console)"),
-                ),
-                FormatColor::Default,
-            ),
-            height: 1,
-        }
-    }
-
-    fn new_wrapped(event: &'a StackEvent, wrap_width: u16) -> Self {
-        let (resource_status_reason, height) = event
-            .resource_status_reason
-            .as_deref()
-            .map(|reason| {
-                let reason = Text::from(textwrap::fill(reason, usize::from(wrap_width)));
-                let height = reason.height().try_into().unwrap();
-                ((reason, FormatColor::Default), height)
-            })
-            .unwrap_or_else(|| ((Text::from(""), FormatColor::Default), 1));
-        Self {
-            timestamp: (
-                Text::from(event.timestamp.to_rfc3339()),
-                FormatColor::Default,
-            ),
-            resource_type: (
-                Text::from(event.resource_type.as_str()),
-                FormatColor::Default,
-            ),
-            logical_resource_id: (
-                Text::from(event.logical_resource_id.as_str()),
-                FormatColor::Default,
-            ),
-            resource_status: (
-                Text::from(event.resource_status.to_string()),
-                colorize_status(&event.resource_status),
-            ),
-            resource_status_reason,
-            height,
-        }
-    }
-
-    fn into_row(self) -> Row<'a> {
-        Row::new(vec![
-            Cell::from(self.timestamp.0).style(self.timestamp.1.style()),
-            Cell::from(self.resource_type.0).style(self.resource_type.1.style()),
-            Cell::from(self.logical_resource_id.0).style(self.logical_resource_id.1.style()),
-            Cell::from(self.resource_status.0).style(self.resource_status.1.style()),
-            Cell::from(self.resource_status_reason.0).style(self.resource_status_reason.1.style()),
-        ])
-        .height(self.height)
-    }
-}
-
-impl<'a> fmt::Display for FormattedStackEvent<'a> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}{}{} {}{}{} {}{}{} {}{}{} {}{}{}",
-            self.timestamp.1,
-            self.timestamp
-                .0
-                .lines
-                .iter()
-                .flat_map(|Spans(spans)| spans)
-                .map(|span| span.content.to_owned())
-                .collect::<Vec<_>>()
-                .join("\n"),
-            FormatColor::Default,
-            self.resource_type.1,
-            self.resource_type
-                .0
-                .lines
-                .iter()
-                .flat_map(|Spans(spans)| spans)
-                .map(|span| span.content.to_owned())
-                .collect::<Vec<_>>()
-                .join("\n"),
-            FormatColor::Default,
-            self.logical_resource_id.1,
-            self.logical_resource_id
-                .0
-                .lines
-                .iter()
-                .flat_map(|Spans(spans)| spans)
-                .map(|span| span.content.to_owned())
-                .collect::<Vec<_>>()
-                .join("\n"),
-            FormatColor::Default,
-            self.resource_status.1,
-            self.resource_status
-                .0
-                .lines
-                .iter()
-                .flat_map(|Spans(spans)| spans)
-                .map(|span| span.content.to_owned())
-                .collect::<Vec<_>>()
-                .join("\n"),
-            FormatColor::Default,
-            self.resource_status_reason.1,
-            self.resource_status_reason
-                .0
-                .lines
-                .iter()
-                .flat_map(|Spans(spans)| spans)
-                .map(|span| span.content.to_owned())
-                .collect::<Vec<_>>()
-                .join("\n"),
-            FormatColor::Default,
-        )
-    }
-}
-
-async fn try_main<B: tui::backend::Backend>(
-    terminal: &mut Terminal<B>,
-) -> Result<(), Box<dyn Error>> {
-    let credentials = get_credentials()?;
-    let client = get_client(credentials, Region::EuWest2)?;
-
-    let stack_name = "vpc".to_string();
-    let parameters = Default::default();
-    let template_body = fs::read_to_string("test/fixtures/vpc.yaml")?;
-
-    let mut state = State {
-        stack_name: stack_name.clone(),
-        stack_state: None,
-        events: Vec::new(),
-    };
-    state.render(terminal)?;
-
-    let deploy = client.deploy(DeployInput {
-        stack_name,
-        parameters,
-        template_body,
-    });
-
-    let mut change_sets = deploy.change_sets();
-    while let Some(change_set) = change_sets.try_next().await? {
-        {
-            let change_set = change_set.change_set();
-
-            let stack_state = state.stack_state.get_or_insert_with(|| StackState {
-                stack_id: change_set.stack_id.clone(),
-                last_event: None,
-                resource_states: IndexMap::new(),
-            });
-            if stack_state.stack_id != change_set.stack_id {
-                stack_state.stack_id = change_set.stack_id.clone();
-            }
-
-            for change in &change_set.resource_changes {
-                stack_state.resource_states.insert(
-                    change.logical_resource_id.clone(),
-                    ResourceState {
-                        plan: change.clone(),
-                        last_event: None,
-                    },
-                );
-            }
-        }
-        state.render(terminal)?;
-
-        let mut events = change_set.events();
-        while let Some(event) = events.try_next().await? {
-            state.events.push(event.clone());
-
-            // unwrap OK because we initialised above
-            let stack_state = state.stack_state.as_mut().unwrap();
-
-            if event.physical_resource_id.as_deref() == Some(&stack_state.stack_id) {
-                stack_state.last_event = Some(event);
+impl TryFrom<DeleteStackArgs> for DeleteStackInput {
+    type Error = Error;
+    fn try_from(args: DeleteStackArgs) -> Result<Self, Self::Error> {
+        let template_path = args.template_path;
+        Ok(DeleteStackInput {
+            client_request_token: args.client_request_token,
+            retain_resources: if args.retain_resources.is_empty() {
+                None
             } else {
-                let resource_state = stack_state
-                    .resource_states
-                    .get_mut(&event.logical_resource_id)
-                    .expect("event for unplanned resource");
-                resource_state.last_event = Some(event);
+                Some(args.retain_resources)
+            },
+            role_arn: args.role_arn,
+            stack_name: args.stack_name.unwrap_or_else(|| {
+                template_path
+                    .expect("bug: DeleteStackArgs without stack_name or template_path")
+                    .file_stem()
+                    .unwrap_or_else(|| OsStr::new(""))
+                    .to_string_lossy()
+                    .to_string()
+            }),
+        })
+    }
+}
+
+#[derive(Debug)]
+struct Error {
+    kind: ErrorKind,
+    error: Box<dyn std::error::Error>,
+}
+
+impl Error {
+    fn warning<E: Into<Box<dyn std::error::Error>>>(error: E) -> Self {
+        Self {
+            kind: ErrorKind::Warning,
+            error: error.into(),
+        }
+    }
+
+    fn failure<E: Into<Box<dyn std::error::Error>>>(error: E) -> Self {
+        Self {
+            kind: ErrorKind::Failure,
+            error: error.into(),
+        }
+    }
+
+    fn other<E: Into<Box<dyn std::error::Error>>>(error: E) -> Self {
+        Self {
+            kind: ErrorKind::Other,
+            error: error.into(),
+        }
+    }
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.error.fmt(f)
+    }
+}
+
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self.error.as_ref())
+    }
+}
+
+#[derive(Debug)]
+enum ErrorKind {
+    /// Operation succeeded with warnings.
+    Warning,
+
+    /// Operation failed.
+    Failure,
+
+    /// Another kind of error occurred.
+    Other,
+}
+
+#[tokio::main]
+async fn main() {
+    let args = Args::parse();
+
+    if let Err(error) = try_main(args).await {
+        eprintln!("{}", error);
+        process::exit(match error.kind {
+            ErrorKind::Warning => 3,
+            ErrorKind::Failure => 4,
+            ErrorKind::Other => 1,
+        });
+    }
+}
+
+async fn try_main(args: Args) -> Result<(), Error> {
+    let client = get_client(
+        args.region
+            .map(Ok)
+            .or_else(get_region)
+            .ok_or_else(|| Error::other(MISSING_REGION))?
+            .map_err(Error::other)?,
+    )
+    .await
+    .map_err(Error::other)?;
+
+    match args.command {
+        Command::ApplyStack(cmd_args) => {
+            let mut apply = client.apply_stack(cmd_args.try_into()?);
+
+            if !args.quiet {
+                print_events(apply.events()).await;
             }
 
-            state.render(terminal)?;
+            let output = apply.await.map_err(|error| match &error {
+                ApplyStackError::Warning { .. } => Error::warning(error),
+                ApplyStackError::Failure { .. } => Error::failure(error),
+                ApplyStackError::CloudFormationApi(_) => Error::other(error),
+                ApplyStackError::CreateChangeSetFailed { .. } => Error::other(error),
+            })?;
+
+            let outputs_json: serde_json::Value = output
+                .outputs
+                .into_iter()
+                .map(|output| (output.key, output.value.into()))
+                .collect::<serde_json::Map<_, _>>()
+                .into();
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&outputs_json).expect("oh no")
+            );
+        }
+        Command::DeleteStack(cmd_args) => {
+            let mut delete = client.delete_stack(cmd_args.try_into()?);
+
+            if !args.quiet {
+                print_events(delete.events()).await;
+            }
+
+            delete.await.map_err(|error| match &error {
+                DeleteStackError::Warning { .. } => Error::warning(error),
+                DeleteStackError::Failure { .. } => Error::failure(error),
+                DeleteStackError::CloudFormationApi(_) => Error::other(error),
+            })?;
         }
     }
 
     Ok(())
 }
 
-fn get_credentials() -> Result<impl ProvideAwsCredentials + Send + Sync, CredentialsError> {
-    let mut credentials = ChainProvider::new();
-    credentials.set_timeout(Duration::from_secs(0));
-    AutoRefreshingProvider::new(credentials)
+fn get_region() -> Option<Result<Region, Box<dyn std::error::Error>>> {
+    // rusoto_cloudformation::Region::default implements a similar algorithm but falls back to
+    // us-east-1, which we don't want.
+    match env::var("AWS_DEFAULT_REGION").or_else(|_| env::var("AWS_REGION")) {
+        Ok(region) => Some(region.parse().map_err(Into::into)),
+        Err(_) => match ProfileProvider::region() {
+            Ok(Some(region)) => Some(region.parse().map_err(Into::into)),
+            Ok(None) => None,
+            Err(error) => Some(Err(error.into())),
+        },
+    }
 }
 
-fn get_client(
-    credentials: impl ProvideAwsCredentials + Send + Sync + 'static,
-    region: Region,
-) -> Result<CloudFormationClient, TlsError> {
+async fn get_client(region: Region) -> Result<CloudFormationClient, Box<dyn std::error::Error>> {
     let client = HttpClient::new()?;
+
+    let mut credentials = AutoRefreshingProvider::new(ChainProvider::new())?;
+    credentials.get_mut().set_timeout(Duration::from_secs(1));
+
+    // Proactively fetch credentials so we get earlier errors.
+    credentials.credentials().await?;
+
     Ok(CloudFormationClient::new_with(client, credentials, region))
 }
 
-fn colorize_status(status: &ResourceStatus) -> FormatColor {
-    match status {
-        ResourceStatus::ReviewInProgress => FormatColor::Yellow,
-        ResourceStatus::CreateInProgress => FormatColor::Yellow,
-        ResourceStatus::CreateFailed => FormatColor::Red,
-        ResourceStatus::CreateComplete => FormatColor::Green,
-        ResourceStatus::DeleteInProgress => FormatColor::Yellow,
-        ResourceStatus::DeleteFailed => FormatColor::Red,
-        ResourceStatus::DeleteComplete => FormatColor::Green,
-        ResourceStatus::RollbackInProgress => FormatColor::Yellow,
-        ResourceStatus::RollbackFailed => FormatColor::Red,
-        ResourceStatus::RollbackComplete => FormatColor::Red,
+async fn print_events(mut events: impl Stream<Item = StackEvent> + Unpin) {
+    while let Some(event) = events.next().await {
+        eprintln!(
+            "{}\t{}\t{}\t{}\t{}",
+            format!("{:?}", event.timestamp()).bright_black(),
+            colorize_status(event.resource_status()),
+            event.logical_resource_id(),
+            event.resource_type(),
+            colorize_status_reason(
+                event.resource_status(),
+                event.resource_status_reason().unwrap_or("")
+            )
+        );
+    }
+    eprintln!();
+}
+
+fn colorize_status(status: &dyn Status) -> ColoredString {
+    match status.sentiment() {
+        StatusSentiment::Positive => status.to_string().green(),
+        StatusSentiment::Neutral => status.to_string().yellow(),
+        StatusSentiment::Negative => status.to_string().red(),
+    }
+}
+
+fn colorize_status_reason(status: &dyn Status, reason: &str) -> ColoredString {
+    if status.sentiment().is_negative() {
+        reason.red()
+    } else {
+        reason.bright_black()
     }
 }

@@ -1,28 +1,19 @@
 [package]
-name = "cfn-deploy"
+name = "cloudformatious-cli"
 version = "0.1.0"
 authors = ["Chris Connelly <chris@connec.co.uk>"]
+license = "MIT"
 edition = "2018"
-
-[profile.dev]
-panic = "abort"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+description = "A CloudFormation CLI that won't make you cry"
+repository = "https://github.com/connec/cloudformatious-cli"
 
 [dependencies]
-async-stream = "0.3.0"
-chrono = "0.4.19"
-http = "0.2.3"
-indexmap = "1.6.2"
-pin-utils = "0.1.0"
+clap = "3.0.0-beta.2"
+cloudformatious = "=0.0.5"
+colored = "2.0.0"
+futures-util = "0.3.14"
 rusoto_cloudformation = "0.46.0"
 rusoto_core = "0.46.0"
 rusoto_credential = "0.46.0"
-termion = "1.5.6"
-textwrap = "0.13.4"
-tokio = "1.4.0"
-tokio-stream = "0.1.5"
-tui = "0.14.0"
-
-[dev-dependencies]
-bytes = "1.0.1"
+serde_json = "1.0.64"
+tokio = { version = "1.5.0", features = ["macros"] }
