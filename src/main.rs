@@ -13,8 +13,8 @@ use std::{
 use clap::Clap;
 use cloudformatious::{
     change_set::ChangeSet, ApplyStackError, ApplyStackInput, Capability, CloudFormatious,
-    DeleteStackError, DeleteStackInput, Parameter, StackEvent, StackStatus, Status,
-    StatusSentiment, TemplateSource,
+    DeleteStackError, DeleteStackInput, Parameter, StackEvent, StackFailure, StackStatus,
+    StackWarning, Status, StatusSentiment, TemplateSource,
 };
 use colored::{ColoredString, Colorize};
 use futures_util::{Stream, StreamExt};
@@ -385,56 +385,35 @@ impl TryFrom<DeleteStackArgs> for DeleteStackInput {
 }
 
 #[derive(Debug)]
-struct Error {
-    kind: ErrorKind,
-    error: Box<dyn std::error::Error>,
+enum Error {
+    Warning(StackWarning),
+    Failure(StackFailure),
+    Other(Box<dyn std::error::Error>),
 }
 
 impl Error {
-    fn warning<E: Into<Box<dyn std::error::Error>>>(error: E) -> Self {
-        Self {
-            kind: ErrorKind::Warning,
-            error: error.into(),
-        }
-    }
-
-    fn failure<E: Into<Box<dyn std::error::Error>>>(error: E) -> Self {
-        Self {
-            kind: ErrorKind::Failure,
-            error: error.into(),
-        }
-    }
-
     fn other<E: Into<Box<dyn std::error::Error>>>(error: E) -> Self {
-        Self {
-            kind: ErrorKind::Other,
-            error: error.into(),
-        }
+        Self::Other(error.into())
     }
 }
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.error.fmt(f)
+        match self {
+            Self::Warning(warning) => warning.fmt(f),
+            Self::Failure(failure) => failure.fmt(f),
+            Self::Other(error) => error.fmt(f),
+        }
     }
 }
 
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(self.error.as_ref())
+        match self {
+            Self::Warning(_) | Self::Failure(_) => None,
+            Self::Other(error) => Some(error.as_ref()),
+        }
     }
-}
-
-#[derive(Debug)]
-enum ErrorKind {
-    /// Operation succeeded with warnings.
-    Warning,
-
-    /// Operation failed.
-    Failure,
-
-    /// Another kind of error occurred.
-    Other,
 }
 
 #[tokio::main]
@@ -443,10 +422,10 @@ async fn main() {
 
     if let Err(error) = try_main(args).await {
         eprintln!("{}", error);
-        process::exit(match error.kind {
-            ErrorKind::Warning => 3,
-            ErrorKind::Failure => 4,
-            ErrorKind::Other => 1,
+        process::exit(match error {
+            Error::Warning(_) => 3,
+            Error::Failure(_) => 4,
+            Error::Other(_) => 1,
         });
     }
 }
@@ -473,9 +452,9 @@ async fn try_main(args: Args) -> Result<(), Error> {
                 print_events(&sizing, apply.events()).await;
             }
 
-            let output = apply.await.map_err(|error| match &error {
-                ApplyStackError::Warning { .. } => Error::warning(error),
-                ApplyStackError::Failure { .. } => Error::failure(error),
+            let output = apply.await.map_err(|error| match error {
+                ApplyStackError::Warning { warning, .. } => Error::Warning(warning),
+                ApplyStackError::Failure(failure) => Error::Failure(failure),
                 ApplyStackError::CloudFormationApi(_) => Error::other(error),
                 ApplyStackError::CreateChangeSetFailed { .. } => Error::other(error),
             })?;
@@ -499,9 +478,9 @@ async fn try_main(args: Args) -> Result<(), Error> {
                 print_events(&sizing, delete.events()).await;
             }
 
-            delete.await.map_err(|error| match &error {
-                DeleteStackError::Warning { .. } => Error::warning(error),
-                DeleteStackError::Failure { .. } => Error::failure(error),
+            delete.await.map_err(|error| match error {
+                DeleteStackError::Warning(warning) => Error::Warning(warning),
+                DeleteStackError::Failure(failure) => Error::Failure(failure),
                 DeleteStackError::CloudFormationApi(_) => Error::other(error),
             })?;
         }
