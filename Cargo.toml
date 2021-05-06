@@ -9,7 +9,7 @@ repository = "https://github.com/connec/cloudformatious-cli"
 
 [dependencies]
 clap = "3.0.0-beta.2"
-cloudformatious = "=0.0.5"
+cloudformatious = "=0.0.7"
 colored = "2.0.0"
 futures-util = "0.3.14"
 rusoto_cloudformation = "0.46.0"

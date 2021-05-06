@@ -3,7 +3,7 @@ use std::{
     convert::{TryFrom, TryInto},
     env,
     ffi::OsStr,
-    fmt, fs,
+    fmt, fs, iter,
     path::PathBuf,
     process,
     str::FromStr,
@@ -12,8 +12,9 @@ use std::{
 
 use clap::Clap;
 use cloudformatious::{
-    ApplyStackError, ApplyStackInput, Capability, CloudFormatious, DeleteStackError,
-    DeleteStackInput, Parameter, StackEvent, Status, StatusSentiment, TemplateSource,
+    change_set::ChangeSet, ApplyStackError, ApplyStackInput, Capability, CloudFormatious,
+    DeleteStackError, DeleteStackInput, Parameter, StackEvent, StackStatus, Status,
+    StatusSentiment, TemplateSource,
 };
 use colored::{ColoredString, Colorize};
 use futures_util::{Stream, StreamExt};
@@ -25,6 +26,9 @@ use rusoto_credential::{
 
 const MISSING_REGION: &str = "Unable to determine AWS region.
 You can set it in your profile, assign `AWS_REGION`, or supply `--region`.";
+const AWS_CLOUDFORMATION_STACK: &str = "AWS::CloudFormation::Stack";
+const SHORT_UPDATE_COMPLETE_CLEANUP_IN_PROGRESS: &str = "UPDATE_CLEANUP_IN_PROGRESS";
+const SHORT_UPDATE_ROLLBACK_COMPLETE_CLEANUP_IN_PROGRESS: &str = "ROLLBACK_CLEANUP_IN_PROGRESS";
 
 /// A CloudFormation CLI that won't make you cry.
 ///
@@ -462,8 +466,11 @@ async fn try_main(args: Args) -> Result<(), Error> {
         Command::ApplyStack(cmd_args) => {
             let mut apply = client.apply_stack(cmd_args.try_into()?);
 
+            let change_set = apply.change_set().await.map_err(Error::other)?;
+            let sizing = Sizing::new_for_change_set(&change_set);
+
             if !args.quiet {
-                print_events(apply.events()).await;
+                print_events(&sizing, apply.events()).await;
             }
 
             let output = apply.await.map_err(|error| match &error {
@@ -486,9 +493,10 @@ async fn try_main(args: Args) -> Result<(), Error> {
         }
         Command::DeleteStack(cmd_args) => {
             let mut delete = client.delete_stack(cmd_args.try_into()?);
+            let sizing = Sizing::default();
 
             if !args.quiet {
-                print_events(delete.events()).await;
+                print_events(&sizing, delete.events()).await;
             }
 
             delete.await.map_err(|error| match &error {
@@ -527,28 +535,87 @@ async fn get_client(region: Region) -> Result<CloudFormationClient, Box<dyn std:
     Ok(CloudFormationClient::new_with(client, credentials, region))
 }
 
-async fn print_events(mut events: impl Stream<Item = StackEvent> + Unpin) {
+struct Sizing {
+    resource_status: usize,
+    logical_resource_id: usize,
+    resource_type: usize,
+}
+
+impl Sizing {
+    fn new_for_change_set(change_set: &ChangeSet) -> Self {
+        let default = Self::default();
+        Self {
+            resource_status: default.resource_status,
+            logical_resource_id: change_set
+                .changes
+                .iter()
+                .map(|change| change.logical_resource_id.len())
+                .chain(iter::once(change_set.stack_name.len()))
+                .max()
+                .unwrap(), // we insert the stack name so unwrap is fine
+            resource_type: change_set
+                .changes
+                .iter()
+                .map(|change| change.resource_type.len())
+                .chain(iter::once(default.resource_type))
+                .max()
+                .unwrap(), // we insert the default so unwrap is fine
+        }
+    }
+}
+
+impl Default for Sizing {
+    fn default() -> Self {
+        Self {
+            resource_status: SHORT_UPDATE_ROLLBACK_COMPLETE_CLEANUP_IN_PROGRESS.len(),
+            logical_resource_id: 0,
+            resource_type: AWS_CLOUDFORMATION_STACK.len(),
+        }
+    }
+}
+
+async fn print_events(sizing: &Sizing, mut events: impl Stream<Item = StackEvent> + Unpin) {
     while let Some(event) = events.next().await {
         eprintln!(
-            "{}\t{}\t{}\t{}\t{}",
+            "{} {:resource_status_size$} {:logical_resource_id_size$} {:resource_type_size$} {}",
             format!("{:?}", event.timestamp()).bright_black(),
-            colorize_status(event.resource_status()),
+            colorize_status(&event),
             event.logical_resource_id(),
             event.resource_type(),
             colorize_status_reason(
                 event.resource_status(),
                 event.resource_status_reason().unwrap_or("")
-            )
+            ),
+            resource_status_size = sizing.resource_status,
+            logical_resource_id_size = sizing.logical_resource_id,
+            resource_type_size = sizing.resource_type,
         );
     }
     eprintln!();
 }
 
-fn colorize_status(status: &dyn Status) -> ColoredString {
-    match status.sentiment() {
-        StatusSentiment::Positive => status.to_string().green(),
-        StatusSentiment::Neutral => status.to_string().yellow(),
-        StatusSentiment::Negative => status.to_string().red(),
+fn colorize_status(event: &StackEvent) -> ColoredString {
+    let status = match event {
+        StackEvent::Resource {
+            resource_status, ..
+        } => resource_status.to_string(),
+        // Shorten the most verbose statuses for better formatting
+        StackEvent::Stack {
+            resource_status, ..
+        } => match resource_status {
+            StackStatus::UpdateCompleteCleanupInProgress => {
+                SHORT_UPDATE_COMPLETE_CLEANUP_IN_PROGRESS.to_string()
+            }
+            StackStatus::UpdateRollbackCompleteCleanupInProgress => {
+                SHORT_UPDATE_ROLLBACK_COMPLETE_CLEANUP_IN_PROGRESS.to_string()
+            }
+            _ => resource_status.to_string(),
+        },
+    };
+    match event.resource_status().sentiment() {
+        StatusSentiment::Positive => status.green(),
+        StatusSentiment::Neutral => status.yellow(),
+        StatusSentiment::Negative => status.red(),
     }
 }
 
