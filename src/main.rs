@@ -401,7 +401,47 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Warning(warning) => warning.fmt(f),
-            Self::Failure(failure) => failure.fmt(f),
+            Self::Failure(failure) => {
+                writeln!(
+                    f,
+                    "Failed to apply stack {}:
+
+{}: {}
+{}: {}",
+                    failure.stack_id,
+                    "- Status".bright_black(),
+                    failure.stack_status.to_string().red(),
+                    "- Reason".bright_black(),
+                    failure.stack_status_reason.red()
+                )?;
+
+                if !failure.resource_events.is_empty() {
+                    writeln!(f)?;
+                    writeln!(f, "What went wrong? The following resource errors occurred during the operation:")?;
+                    for (index, (resource_status, event_details)) in
+                        failure.resource_events.iter().enumerate()
+                    {
+                        writeln!(
+                            f,
+                            "
+{}: {}
+   {}:     {}
+   {}:   {}
+   {}:   {}",
+                            format!("{}. Resource", index + 1).bright_black(),
+                            event_details.logical_resource_id(),
+                            "Type".bright_black(),
+                            event_details.resource_type(),
+                            "Status".bright_black(),
+                            resource_status.to_string().red(),
+                            "Reason".bright_black(),
+                            event_details.resource_status_reason().unwrap_or("").red()
+                        )?;
+                    }
+                }
+
+                Ok(())
+            }
             Self::Other(error) => error.fmt(f),
         }
     }
