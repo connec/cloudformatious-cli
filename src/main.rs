@@ -14,10 +14,11 @@ use clap::Clap;
 use cloudformatious::{
     change_set::ChangeSet, ApplyStackError, ApplyStackInput, Capability, CloudFormatious,
     DeleteStackError, DeleteStackInput, Parameter, StackEvent, StackFailure, StackStatus,
-    StackWarning, Status, StatusSentiment, TemplateSource,
+    StackWarning, StatusSentiment, TemplateSource,
 };
 use colored::{ColoredString, Colorize};
 use futures_util::{Stream, StreamExt};
+use regex::Regex;
 use rusoto_cloudformation::{CloudFormationClient, Tag};
 use rusoto_core::{HttpClient, Region};
 use rusoto_credential::{
@@ -29,6 +30,12 @@ You can set it in your profile, assign `AWS_REGION`, or supply `--region`.";
 const AWS_CLOUDFORMATION_STACK: &str = "AWS::CloudFormation::Stack";
 const SHORT_UPDATE_COMPLETE_CLEANUP_IN_PROGRESS: &str = "UPDATE_CLEANUP_IN_PROGRESS";
 const SHORT_UPDATE_ROLLBACK_COMPLETE_CLEANUP_IN_PROGRESS: &str = "ROLLBACK_CLEANUP_IN_PROGRESS";
+const NO_REASON: &str = "No reason";
+
+lazy_static::lazy_static! {
+    static ref MISSING_PERMISSION: Regex = Regex::new("API: (?P<permission>[a-z0-9]+:[a-zA-Z0-9]+) You are not authorized to perform this operation").unwrap();
+    static ref RESOURCE_ERROR: Regex = Regex::new("The following resource\\(s\\) failed to (?:create|delete|update): \\[(?P<resources>[a-zA-Z0-9]+(?:, *[a-zA-Z0-9]+)*)\\]").unwrap();
+}
 
 /// A CloudFormation CLI that won't make you cry.
 ///
@@ -402,41 +409,34 @@ impl fmt::Display for Error {
         match self {
             Self::Warning(warning) => warning.fmt(f),
             Self::Failure(failure) => {
-                writeln!(
-                    f,
-                    "Failed to apply stack {}:
+                writeln!(f, "Failed to apply stack {}:\n", failure.stack_id.bold())?;
 
-{}: {}
-{}: {}",
-                    failure.stack_id,
-                    "- Status".bright_black(),
-                    failure.stack_status.to_string().red(),
-                    "- Reason".bright_black(),
-                    failure.stack_status_reason.red()
-                )?;
+                let status = failure.stack_status.to_string();
+                let reason = &failure.stack_status_reason;
+                writeln!(f, "   {} {}", "Status:".bold(), status.red())?;
+                writeln!(f, "   {} {}", "Reason:".bold(), reason)?;
+
+                if let Some(hint) = get_hint(reason) {
+                    writeln!(f, "   {:<7} {}", "Hint:".bold(), hint)?;
+                }
 
                 if !failure.resource_events.is_empty() {
-                    writeln!(f)?;
-                    writeln!(f, "What went wrong? The following resource errors occurred during the operation:")?;
+                    writeln!(f, "\nWhat went wrong? The following resource errors occurred during the operation:")?;
                     for (index, (resource_status, event_details)) in
                         failure.resource_events.iter().enumerate()
                     {
-                        writeln!(
-                            f,
-                            "
-{}: {}
-   {}:     {}
-   {}:   {}
-   {}:   {}",
-                            format!("{}. Resource", index + 1).bright_black(),
-                            event_details.logical_resource_id(),
-                            "Type".bright_black(),
-                            event_details.resource_type(),
-                            "Status".bright_black(),
-                            resource_status.to_string().red(),
-                            "Reason".bright_black(),
-                            event_details.resource_status_reason().unwrap_or("").red()
-                        )?;
+                        let resource = event_details.logical_resource_id();
+                        let type_ = event_details.resource_type();
+                        let status = resource_status.to_string();
+                        let reason = event_details.resource_status_reason().unwrap_or(NO_REASON);
+                        writeln!(f, "\n{}. {} {}", index + 1, "Resource:".bold(), resource)?;
+                        writeln!(f, "   {:<9} {}", "Type:".bold(), type_)?;
+                        writeln!(f, "   {:<9} {}", "Status:".bold(), status)?;
+                        writeln!(f, "   {:<9} {}", "Reason:".bold(), reason)?;
+
+                        if let Some(hint) = get_hint(reason) {
+                            writeln!(f, "   {:<9} {}", "Hint:".bold(), hint)?;
+                        }
                     }
                 }
 
@@ -597,20 +597,36 @@ async fn print_events(sizing: &Sizing, mut events: impl Stream<Item = StackEvent
     while let Some(event) = events.next().await {
         eprintln!(
             "{} {:resource_status_size$} {:logical_resource_id_size$} {:resource_type_size$} {}",
-            format!("{:?}", event.timestamp()).bright_black(),
+            format!("{:?}", event.timestamp()),
             colorize_status(&event),
             event.logical_resource_id(),
             event.resource_type(),
-            colorize_status_reason(
-                event.resource_status(),
-                event.resource_status_reason().unwrap_or("")
-            ),
+            event.resource_status_reason().unwrap_or("").bright_black(),
             resource_status_size = sizing.resource_status,
             logical_resource_id_size = sizing.logical_resource_id,
             resource_type_size = sizing.resource_type,
         );
     }
     eprintln!();
+}
+
+fn get_hint(status_reason: &str) -> Option<String> {
+    if status_reason == NO_REASON {
+        return Some("Check CloudTrail".to_string());
+    }
+    if let Some(error) = RESOURCE_ERROR.captures(status_reason) {
+        return Some(format!(
+            "See resource error(s) for {} below",
+            error["resources"].bold()
+        ));
+    }
+    if let Some(error) = MISSING_PERMISSION.captures(status_reason) {
+        return Some(format!(
+            "Add the {} permission to your IAM policy",
+            &error["permission"].bold()
+        ));
+    }
+    None
 }
 
 fn colorize_status(event: &StackEvent) -> ColoredString {
@@ -635,13 +651,5 @@ fn colorize_status(event: &StackEvent) -> ColoredString {
         StatusSentiment::Positive => status.green(),
         StatusSentiment::Neutral => status.yellow(),
         StatusSentiment::Negative => status.red(),
-    }
-}
-
-fn colorize_status_reason(status: &dyn Status, reason: &str) -> ColoredString {
-    if status.sentiment().is_negative() {
-        reason.red()
-    } else {
-        reason.bright_black()
     }
 }
