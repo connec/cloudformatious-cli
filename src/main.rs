@@ -431,7 +431,7 @@ impl fmt::Display for Error {
                         let reason = event_details.resource_status_reason().unwrap_or(NO_REASON);
                         writeln!(f, "\n{}. {} {}", index + 1, "Resource:".bold(), resource)?;
                         writeln!(f, "   {:<9} {}", "Type:".bold(), type_)?;
-                        writeln!(f, "   {:<9} {}", "Status:".bold(), status)?;
+                        writeln!(f, "   {:<9} {}", "Status:".bold(), status.red())?;
                         writeln!(f, "   {:<9} {}", "Reason:".bold(), reason)?;
 
                         if let Some(hint) = get_hint(reason) {
