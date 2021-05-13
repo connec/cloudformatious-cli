@@ -33,8 +33,10 @@ const SHORT_UPDATE_ROLLBACK_COMPLETE_CLEANUP_IN_PROGRESS: &str = "ROLLBACK_CLEAN
 const NO_REASON: &str = "No reason";
 
 lazy_static::lazy_static! {
-    static ref MISSING_PERMISSION: Regex = Regex::new("API: (?P<permission>[a-z0-9]+:[a-zA-Z0-9]+) You are not authorized to perform this operation").unwrap();
-    static ref RESOURCE_ERROR: Regex = Regex::new("The following resource\\(s\\) failed to (?:create|delete|update): \\[(?P<resources>[a-zA-Z0-9]+(?:, *[a-zA-Z0-9]+)*)\\]").unwrap();
+    static ref MISSING_PERMISSION_1: Regex = Regex::new("(?i)API: (?P<permission>[a-z0-9]+:[a-zA-Z0-9]+) You are not authorized to perform this operation").unwrap();
+    static ref MISSING_PERMISSION_2: Regex = Regex::new("(?i)User: (?P<principal>[a-z0-9:/-]+) is not authorized to perform: (?P<permission>[a-z0-9]+:[a-zA-Z0-9]+)").unwrap();
+    static ref RESOURCE_ERROR: Regex = Regex::new("(?i)The following resource\\(s\\) failed to (?:create|delete|update): \\[(?P<resources>[a-zA-Z0-9]+(?:, *[a-zA-Z0-9]+)*)\\]").unwrap();
+    static ref RESOURCE_CANCEL: Regex = Regex::new("(?i)Resource creation cancelled").unwrap();
 }
 
 /// A CloudFormation CLI that won't make you cry.
@@ -620,11 +622,21 @@ fn get_hint(status_reason: &str) -> Option<String> {
             error["resources"].bold()
         ));
     }
-    if let Some(error) = MISSING_PERMISSION.captures(status_reason) {
+    if let Some(error) = MISSING_PERMISSION_1.captures(status_reason) {
         return Some(format!(
             "Add the {} permission to your IAM policy",
             &error["permission"].bold()
         ));
+    }
+    if let Some(error) = MISSING_PERMISSION_2.captures(status_reason) {
+        return Some(format!(
+            "Grant {} the {} permission",
+            &error["principal"].bold(),
+            &error["permission"].bold(),
+        ));
+    }
+    if RESOURCE_CANCEL.is_match(status_reason) {
+        return Some("See preceding resource errors".to_string());
     }
     None
 }
