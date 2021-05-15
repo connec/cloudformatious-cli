@@ -157,15 +157,17 @@ dependencies = [
 
 [[package]]
 name = "cloudformatious"
-version = "0.0.7"
+version = "0.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "20a9ae209b4c31fb7ed788e3eacc5c0793b11117cc4a578136dc27515947621e"
+checksum = "e8b5af265b62d02fcdf959791cf3869177058413a9580306c47897f8ca8105fe"
 dependencies = [
  "async-stream",
  "chrono",
  "enumset",
  "futures-util",
+ "lazy_static",
  "memmem",
+ "regex",
  "rusoto_cloudformation",
  "rusoto_core",
  "serde",
@@ -181,8 +183,6 @@ dependencies = [
  "cloudformatious",
  "colored",
  "futures-util",
- "lazy_static",
- "regex",
  "rusoto_cloudformation",
  "rusoto_core",
  "rusoto_credential",

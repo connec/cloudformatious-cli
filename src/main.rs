@@ -12,13 +12,12 @@ use std::{
 
 use clap::Clap;
 use cloudformatious::{
-    change_set::ChangeSet, ApplyStackError, ApplyStackInput, Capability, CloudFormatious,
-    DeleteStackError, DeleteStackInput, Parameter, StackEvent, StackFailure, StackStatus,
-    StackWarning, StatusSentiment, TemplateSource,
+    change_set::ChangeSet, status_reason::StatusReasonDetail, ApplyStackError, ApplyStackInput,
+    Capability, CloudFormatious, DeleteStackError, DeleteStackInput, Parameter, StackEvent,
+    StackFailure, StackStatus, StackWarning, StatusSentiment, TemplateSource,
 };
 use colored::{ColoredString, Colorize};
 use futures_util::{Stream, StreamExt};
-use regex::Regex;
 use rusoto_cloudformation::{CloudFormationClient, Tag};
 use rusoto_core::{HttpClient, Region};
 use rusoto_credential::{
@@ -31,14 +30,6 @@ const AWS_CLOUDFORMATION_STACK: &str = "AWS::CloudFormation::Stack";
 const SHORT_UPDATE_COMPLETE_CLEANUP_IN_PROGRESS: &str = "UPDATE_CLEANUP_IN_PROGRESS";
 const SHORT_UPDATE_ROLLBACK_COMPLETE_CLEANUP_IN_PROGRESS: &str = "ROLLBACK_CLEANUP_IN_PROGRESS";
 const NO_REASON: &str = "No reason";
-
-lazy_static::lazy_static! {
-    static ref MISSING_PERMISSION_1: Regex = Regex::new("(?i)API: (?P<permission>[a-z0-9]+:[a-zA-Z0-9]+) You are not authorized to perform this operation").unwrap();
-    static ref MISSING_PERMISSION_2: Regex = Regex::new("(?i)User: (?P<principal>[a-z0-9:/-]+) is not authorized to perform: (?P<permission>[a-z0-9]+:[a-zA-Z0-9]+)").unwrap();
-    static ref RESOURCE_ERROR: Regex = Regex::new("(?i)The following resource\\(s\\) failed to (?:create|delete|update): \\[(?P<resources>[a-zA-Z0-9]+(?:, *[a-zA-Z0-9]+)*)\\]").unwrap();
-    static ref RESOURCE_CANCEL: Regex = Regex::new("(?i)Resource creation cancelled").unwrap();
-    static ref LOGICAL_RESOURCE_ID: Regex = Regex::new("(?i)[a-z0-9]+").unwrap();
-}
 
 /// A CloudFormation CLI that won't make you cry.
 ///
@@ -415,11 +406,10 @@ impl fmt::Display for Error {
                 writeln!(f, "Failed to apply stack {}:\n", failure.stack_id.bold())?;
 
                 let status = failure.stack_status.to_string();
-                let reason = StatusReason::from(Some(failure.stack_status_reason.as_str()));
                 writeln!(f, "   {} {}", "Status:".bold(), status.red())?;
-                writeln!(f, "   {} {}", "Reason:".bold(), reason)?;
+                writeln!(f, "   {} {}", "Reason:".bold(), failure.stack_status_reason)?;
 
-                if let Some(hint) = reason.into_hint() {
+                if let Some(hint) = failure.stack_status_reason().detail().and_then(get_hint) {
                     writeln!(f, "   {:<7} {}", "Hint:".bold(), hint)?;
                 }
 
@@ -431,13 +421,20 @@ impl fmt::Display for Error {
                         let resource = event_details.logical_resource_id();
                         let type_ = event_details.resource_type();
                         let status = resource_status.to_string();
-                        let reason = StatusReason::from(event_details.resource_status_reason());
+                        let reason = event_details
+                            .resource_status_reason()
+                            .inner()
+                            .unwrap_or(NO_REASON);
                         writeln!(f, "\n{}. {} {}", index + 1, "Resource:".bold(), resource)?;
                         writeln!(f, "   {:<9} {}", "Type:".bold(), type_)?;
                         writeln!(f, "   {:<9} {}", "Status:".bold(), status.red())?;
                         writeln!(f, "   {:<9} {}", "Reason:".bold(), reason)?;
 
-                        if let Some(hint) = reason.into_hint() {
+                        if let Some(hint) = event_details
+                            .resource_status_reason()
+                            .detail()
+                            .and_then(get_hint)
+                        {
                             writeln!(f, "   {:<9} {}", "Hint:".bold(), hint)?;
                         }
                     }
@@ -638,100 +635,22 @@ fn colorize_status(event: &StackEvent) -> ColoredString {
     }
 }
 
-struct StatusReason<'a> {
-    source: Option<&'a str>,
-    detail: StatusReasonDetail<'a>,
-}
-
-impl StatusReason<'_> {
-    fn into_hint(self) -> Option<String> {
-        self.detail.into_hint()
-    }
-}
-
-impl<'a> From<Option<&'a str>> for StatusReason<'a> {
-    fn from(status_reason: Option<&'a str>) -> Self {
-        Self {
-            source: status_reason,
-            detail: StatusReasonDetail::from(status_reason),
-        }
-    }
-}
-
-impl fmt::Display for StatusReason<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.source.unwrap_or(NO_REASON))
-    }
-}
-
-enum StatusReasonDetail<'a> {
-    NoReason,
-    Cancelled,
-    MissingPermission {
-        permission: &'a str,
-        principal: Option<&'a str>,
-    },
-    ResourceErrors {
-        logical_resource_ids: regex::Matches<'static, 'a>,
-    },
-    Other(&'a str),
-}
-
-impl StatusReasonDetail<'_> {
-    fn into_hint(self) -> Option<String> {
-        match self {
-            Self::NoReason => Some("Try to find the event in CloudTrail".to_string()),
-            Self::Cancelled => Some("See preceding resource errors".to_string()),
-            Self::MissingPermission {
-                permission,
-                principal,
-            } => Some(format!(
-                "Give {} the {} permission",
-                principal
-                    .map(Colorize::bold)
-                    .unwrap_or_else(|| "yourself".normal()),
-                permission.bold()
-            )),
-            Self::ResourceErrors {
-                logical_resource_ids,
-            } => Some(format!(
-                "See resource error(s) for {}",
-                display_list(logical_resource_ids.map(|id| id.as_str().bold()))
-            )),
-            Self::Other(_) => None,
-        }
-    }
-}
-
-impl<'a> From<Option<&'a str>> for StatusReasonDetail<'a> {
-    fn from(status_reason: Option<&'a str>) -> Self {
-        let status_reason = match status_reason {
-            None => return Self::NoReason,
-            Some(status_reason) => status_reason,
-        };
-
-        if RESOURCE_CANCEL.is_match(status_reason) {
-            return Self::Cancelled;
-        }
-        if let Some(details) = MISSING_PERMISSION_1.captures(status_reason) {
-            return Self::MissingPermission {
-                permission: details.name("permission").unwrap().as_str(),
-                principal: None,
-            };
-        }
-        if let Some(details) = MISSING_PERMISSION_2.captures(status_reason) {
-            return Self::MissingPermission {
-                permission: details.name("permission").unwrap().as_str(),
-                principal: Some(details.name("principal").unwrap().as_str()),
-            };
-        }
-        if let Some(details) = RESOURCE_ERROR.captures(status_reason) {
-            return Self::ResourceErrors {
-                logical_resource_ids: LOGICAL_RESOURCE_ID
-                    .find_iter(details.name("resources").unwrap().as_str()),
-            };
-        }
-        Self::Other(status_reason)
+fn get_hint(detail: StatusReasonDetail) -> Option<String> {
+    match detail {
+        StatusReasonDetail::CreationCancelled => Some("See preceding resource errors".to_string()),
+        StatusReasonDetail::MissingPermission(detail) => Some(format!(
+            "Give {} the {} permission",
+            detail
+                .principal
+                .map(Colorize::bold)
+                .unwrap_or_else(|| "yourself".normal()),
+            detail.permission.bold()
+        )),
+        StatusReasonDetail::ResourceErrors(detail) => Some(format!(
+            "See resource error(s) for {}",
+            display_list(detail.logical_resource_ids().map(|id| id.bold()))
+        )),
+        _ => None,
     }
 }
 

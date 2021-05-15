@@ -13,11 +13,9 @@ path = "src/main.rs"
 
 [dependencies]
 clap = "3.0.0-beta.2"
-cloudformatious = "=0.0.7"
+cloudformatious = "=0.0.9"
 colored = "2.0.0"
 futures-util = "0.3.14"
-lazy_static = "1.4.0"
-regex = "1.5.4"
 rusoto_cloudformation = "0.46.0"
 rusoto_core = "0.46.0"
 rusoto_credential = "0.46.0"
