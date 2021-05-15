@@ -7,6 +7,10 @@ edition = "2018"
 description = "A CloudFormation CLI that won't make you cry"
 repository = "https://github.com/connec/cloudformatious-cli"
 
+[[bin]]
+name = "cloudformatious"
+path = "src/main.rs"
+
 [dependencies]
 clap = "3.0.0-beta.2"
 cloudformatious = "=0.0.7"
