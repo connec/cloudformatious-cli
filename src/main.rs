@@ -34,7 +34,7 @@ const NO_REASON: &str = "No reason";
 /// A CloudFormation CLI that won't make you cry.
 ///
 /// All commands will look for AWS configuration in the usual places. See AWS CLI documentation for
-/// more information: https://docs.aws.amazon.com/cli/latest/topic/config-vars.html
+/// more information: <https://docs.aws.amazon.com/cli/latest/topic/config-vars.html>
 ///
 /// Use `cloudformatious <command> --help` to get more information about individual commands.
 #[derive(Clap, Debug)]
@@ -596,8 +596,8 @@ impl Default for Sizing {
 async fn print_events(sizing: &Sizing, mut events: impl Stream<Item = StackEvent> + Unpin) {
     while let Some(event) = events.next().await {
         eprintln!(
-            "{} {:resource_status_size$} {:logical_resource_id_size$} {:resource_type_size$} {}",
-            format!("{:?}", event.timestamp()),
+            "{:?} {:resource_status_size$} {:logical_resource_id_size$} {:resource_type_size$} {}",
+            event.timestamp(),
             colorize_status(&event),
             event.logical_resource_id(),
             event.resource_type(),
