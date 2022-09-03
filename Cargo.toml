@@ -12,7 +12,7 @@ name = "cloudformatious"
 path = "src/main.rs"
 
 [dependencies]
-clap = "3.0.0-beta.2"
+clap = { version = "3.2.20", features = ["derive", "env"] }
 cloudformatious = "0.1.0"
 colored = "2.0.0"
 futures-util = "0.3.24"

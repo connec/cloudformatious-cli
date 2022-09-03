@@ -10,7 +10,7 @@ use std::{
     time::Duration,
 };
 
-use clap::Clap;
+use clap::Parser;
 use cloudformatious::{
     change_set::ChangeSet, status_reason::StatusReasonDetail, ApplyStackError, ApplyStackInput,
     Capability, CloudFormatious, DeleteStackError, DeleteStackInput, Parameter, StackEvent,
@@ -37,7 +37,7 @@ const NO_REASON: &str = "No reason";
 /// more information: <https://docs.aws.amazon.com/cli/latest/topic/config-vars.html>
 ///
 /// Use `cloudformatious <command> --help` to get more information about individual commands.
-#[derive(Clap, Debug)]
+#[derive(Parser, Debug)]
 struct Args {
     /// Disable informational output to STDERR.
     #[clap(long)]
@@ -51,7 +51,7 @@ struct Args {
     command: Command,
 }
 
-#[derive(Clap, Debug)]
+#[derive(Parser, Debug)]
 enum Command {
     ApplyStack(ApplyStackArgs),
     DeleteStack(DeleteStackArgs),
@@ -84,7 +84,7 @@ enum Command {
 /// If the operation fails because the stack settled in an error state, then exit code is 4.
 ///
 /// If the operation fails for any other reason, then the exit code is 1.
-#[derive(Clap, Debug)]
+#[derive(Parser, Debug)]
 struct ApplyStackArgs {
     /// Capabilities to explicitly acknowledge.
     #[clap(long)]
@@ -331,7 +331,7 @@ impl std::error::Error for InvalidTag {}
 /// 4.
 ///
 /// If the deletion fails for any other reason, then the exit code is 1.
-#[derive(Clap, Debug)]
+#[derive(Parser, Debug)]
 struct DeleteStackArgs {
     /// A unique identifier for this `delete_stack` operation.
     #[clap(long)]
