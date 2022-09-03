@@ -13,11 +13,11 @@ path = "src/main.rs"
 
 [dependencies]
 clap = "3.0.0-beta.2"
-cloudformatious = "=0.0.9"
+cloudformatious = "0.1.0"
 colored = "2.0.0"
-futures-util = "0.3.14"
+futures-util = "0.3.24"
 rusoto_cloudformation = "0.46.0"
 rusoto_core = "0.46.0"
 rusoto_credential = "0.46.0"
-serde_json = "1.0.64"
-tokio = { version = "1.5.0", features = ["macros"] }
+serde_json = "1.0.85"
+tokio = { version = "1.21.0", features = ["macros"] }
