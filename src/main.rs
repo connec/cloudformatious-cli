@@ -3,14 +3,14 @@ use std::{
     convert::{TryFrom, TryInto},
     env,
     ffi::OsStr,
-    fmt, fs, iter,
-    path::PathBuf,
+    fmt, fs, io, iter,
+    path::{Path, PathBuf},
     process,
     str::FromStr,
     time::Duration,
 };
 
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 use cloudformatious::{
     change_set::ChangeSet, status_reason::StatusReasonDetail, ApplyStackError, ApplyStackInput,
     Capability, CloudFormatious, DeleteStackError, DeleteStackInput, Parameter, StackEvent,
@@ -38,6 +38,7 @@ const NO_REASON: &str = "No reason";
 ///
 /// Use `cloudformatious <command> --help` to get more information about individual commands.
 #[derive(Parser, Debug)]
+#[clap(name = "cloudformatious")]
 struct Args {
     /// Disable informational output to STDERR.
     #[clap(long)]
@@ -53,8 +54,28 @@ struct Args {
 
 #[derive(Parser, Debug)]
 enum Command {
+    Completions(CompletionsArgs),
     ApplyStack(ApplyStackArgs),
     DeleteStack(DeleteStackArgs),
+}
+
+/// Write a shell completion script to STDOUT.
+#[derive(Parser, Debug)]
+struct CompletionsArgs {
+    /// The shell to generate completions for.
+    ///
+    /// Determined from $SHELL if left unset.
+    #[clap(value_enum)]
+    shell: Option<clap_complete::Shell>,
+}
+
+fn default_shell() -> Option<clap_complete::Shell> {
+    let shell = env::var("SHELL").ok().map(PathBuf::from);
+    shell
+        .as_deref()
+        .and_then(Path::file_name)
+        .and_then(OsStr::to_str)
+        .and_then(|shell_name| shell_name.parse().ok())
 }
 
 /// Apply a CloudFormation template.
@@ -482,6 +503,19 @@ async fn try_main(args: Args) -> Result<(), Error> {
     .map_err(Error::other)?;
 
     match args.command {
+        Command::Completions(cmd_args) => {
+            let mut cmd = Args::command();
+            let cmd_name = cmd.get_name().to_string();
+            if let Some(shell) = cmd_args.shell.or_else(default_shell) {
+                clap_complete::generate(shell, &mut cmd, cmd_name, &mut io::stdout());
+            } else {
+                let shell_env = env::var("SHELL");
+                return Err(Error::other(format!(
+                    "unable to determine current shell from $SHELL ({})",
+                    shell_env.as_deref().unwrap_or("not set"),
+                )));
+            }
+        }
         Command::ApplyStack(cmd_args) => {
             let mut apply = client.apply_stack(cmd_args.try_into()?);
 
