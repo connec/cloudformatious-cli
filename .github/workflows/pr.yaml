@@ -10,7 +10,7 @@ env:
   RUSTDOCFLAGS: -D warnings
 
 jobs:
-  check:
+  update:
     runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v2
@@ -23,10 +23,29 @@ jobs:
             ~/.cargo/git/db
             ~/.cargo/registry/cache
             ~/.cargo/registry/index
-      - name: Check cache
+            Cargo.lock
+      - name: Update
+        run: cargo update --locked
+
+  check:
+    runs-on: ubuntu-20.04
+    needs: [update]
+    steps:
+      - uses: actions/checkout@v2
+      - name: Cargo cache
         uses: actions/cache@v2
         with:
           key: ${{ github.sha }}
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/git/db
+            ~/.cargo/registry/cache
+            ~/.cargo/registry/index
+            Cargo.lock
+      - name: Check cache
+        uses: actions/cache@v2
+        with:
+          key: check-${{ hashFiles('Cargo.lock') }}
           path: target
       - name: Check
         run: cargo check --all-targets
@@ -45,10 +64,11 @@ jobs:
             ~/.cargo/git/db
             ~/.cargo/registry/cache
             ~/.cargo/registry/index
+            Cargo.lock
       - name: Check cache
         uses: actions/cache@v2
         with:
-          key: ${{ github.sha }}
+          key: check-${{ hashFiles('Cargo.lock') }}
           path: target
       - name: Clippy
         run: cargo clippy --all-targets
@@ -67,17 +87,18 @@ jobs:
             ~/.cargo/git/db
             ~/.cargo/registry/cache
             ~/.cargo/registry/index
+            Cargo.lock
       - name: Check cache
         uses: actions/cache@v2
         with:
-          key: ${{ github.sha }}
+          key: check-${{ hashFiles('Cargo.lock') }}
           path: target
       - name: Doc check
         run: cargo doc --no-deps
 
   test:
     runs-on: ubuntu-20.04
-    needs: [check]
+    needs: [update]
     steps:
       - uses: actions/checkout@v2
       - name: Cargo cache
@@ -89,5 +110,11 @@ jobs:
             ~/.cargo/git/db
             ~/.cargo/registry/cache
             ~/.cargo/registry/index
+            Cargo.lock
+      - name: Test cache
+        uses: actions/cache@v2
+        with:
+          key: test-${{ hashFiles('Cargo.lock') }}
+          path: target
       - name: Test
         run: cargo test
