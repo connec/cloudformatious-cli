@@ -1,6 +1,6 @@
 [package]
 name = "cloudformatious-cli"
-version = "0.1.0-rc.2"
+version = "0.1.0"
 authors = ["Chris Connelly <chris@connec.co.uk>"]
 license = "MIT"
 edition = "2018"
