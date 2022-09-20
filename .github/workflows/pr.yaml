@@ -13,19 +13,23 @@ jobs:
   update:
     runs-on: ubuntu-20.04
     steps:
-      - uses: actions/checkout@v2
-      - name: Cargo cache
-        uses: actions/cache@v2
-        with:
-          key: ${{ github.sha }}
-          path: |
-            ~/.cargo/bin
-            ~/.cargo/git/db
-            ~/.cargo/registry/cache
-            ~/.cargo/registry/index
-            Cargo.lock
-      - name: Update
-        run: cargo update --locked
+      # Disabled while we depend on an old version of rusoto. Otherwise cargo update tries to bump
+      # the rusoto_credential dependency in aws_sso_flow, which breaks the build.
+      # - uses: actions/checkout@v2
+      # - name: Cargo cache
+      #   uses: actions/cache@v2
+      #   with:
+      #     key: ${{ github.sha }}
+      #     path: |
+      #       ~/.cargo/bin
+      #       ~/.cargo/git/db
+      #       ~/.cargo/registry/cache
+      #       ~/.cargo/registry/index
+      #       Cargo.lock
+      # - name: Update
+      #   run: cargo update --locked
+      - name: No-op
+        run: exit 0
 
   check:
     runs-on: ubuntu-20.04

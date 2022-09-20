@@ -579,14 +579,40 @@ fn get_region() -> Option<Result<Region, Box<dyn std::error::Error>>> {
 async fn get_client(region: Region) -> Result<CloudFormationClient, Box<dyn std::error::Error>> {
     let client = HttpClient::new()?;
 
-    let mut credentials = AutoRefreshingProvider::new(ChainProvider::new())?;
-    credentials.get_mut().set_timeout(Duration::from_secs(1));
+    let mut credentials = ChainProvider::new();
+    credentials.set_timeout(Duration::from_secs(1));
+
+    let credentials =
+        AutoRefreshingProvider::new(aws_sso_flow::ChainProvider::new().push(credentials).push(
+            aws_sso_flow::SsoFlow::builder().verification_prompt(|url| async move {
+                if atty::is(atty::Stream::Stdin) && atty::is(atty::Stream::Stdout) {
+                    eprintln!("Using SSO an profile – go to {url} to authenticate");
+                    Ok(())
+                } else {
+                    Err(NonInteractiveSsoError)
+                }
+            }),
+        ))?;
 
     // Proactively fetch credentials so we get earlier errors.
     credentials.credentials().await?;
 
     Ok(CloudFormationClient::new_with(client, credentials, region))
 }
+
+#[derive(Debug)]
+struct NonInteractiveSsoError;
+
+impl fmt::Display for NonInteractiveSsoError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "can't complete SSO authentication in a non-interactive context"
+        )
+    }
+}
+
+impl std::error::Error for NonInteractiveSsoError {}
 
 struct Sizing {
     resource_status: usize,

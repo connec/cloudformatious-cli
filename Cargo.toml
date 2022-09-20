@@ -12,6 +12,8 @@ name = "cloudformatious"
 path = "src/main.rs"
 
 [dependencies]
+atty = "0.2.14"
+aws_sso_flow = { version = "0.2.0", default-features = false, features = ["native-tls", "rusoto"] }
 clap = { version = "3.2.20", features = ["derive", "env"] }
 clap_complete = "3.2.4"
 cloudformatious = "0.1.0"
