@@ -217,9 +217,9 @@ dependencies = [
 
 [[package]]
 name = "cloudformatious"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7bf4d2a6839351cdf2d73a9504741e5b37ffb2250ca64f6c0680e1b88f964ad2"
+checksum = "115bf8830d5e3410f97cfdf1c9bd65a634b8cd155b7efe107480e2a8028cb9c4"
 dependencies = [
  "async-stream",
  "chrono",
@@ -239,7 +239,7 @@ dependencies = [
 
 [[package]]
 name = "cloudformatious-cli"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "atty",
  "aws_sso_flow",
