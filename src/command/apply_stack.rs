@@ -8,7 +8,7 @@ use rusoto_core::Region;
 
 use crate::{
     fmt::{print_events, Sizing},
-    package, s3, Error, Template,
+    package, s3, template, Error, Template,
 };
 
 /// Apply a CloudFormation template.
@@ -96,7 +96,7 @@ pub struct Args {
     /// If this isn't set explicitly then the file name of the `template_path` is used as the stack
     /// name. E.g. if `template_path` is `deployment/cloudformation/my-stack.yaml` then the default
     /// stack name would be `my-stack`.
-    #[clap(long)]
+    #[clap(long, required_if_eq("template-path", "-"))]
     stack_name: Option<String>,
 
     /// Key-value pairs to associate with this stack.
@@ -123,13 +123,15 @@ impl Args {
                 Some(self.resource_types)
             },
             role_arn: self.role_arn,
-            stack_name: self.stack_name.unwrap_or_else(|| {
-                template
-                    .path()
+            stack_name: self.stack_name.unwrap_or_else(|| match template.source() {
+                template::Source::Path(path) => path
                     .file_stem()
                     .unwrap_or_else(|| OsStr::new(""))
                     .to_string_lossy()
-                    .to_string()
+                    .to_string(),
+                template::Source::Stdin => {
+                    panic!("expected stack name to be set if template source isn't a file")
+                }
             }),
             tags: self.tags.into_iter().flatten().collect(),
             template_source: TemplateSource::inline(template.to_string()),
@@ -194,7 +196,7 @@ async fn preprocess(
                 "the `--package-bucket` option is required because template `{}` contains ",
                 "references to local paths that will be packaged"
             ),
-            template.path().display()
+            template.source()
         )));
     };
 

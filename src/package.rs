@@ -9,7 +9,7 @@ use tokio::{
     io::{self, AsyncSeekExt},
 };
 
-use crate::{s3, Error, Template};
+use crate::{s3, template, Error, Template};
 
 #[derive(Debug)]
 pub struct PackageableProperty {
@@ -50,11 +50,13 @@ pub fn targets(template: &mut Template) -> impl Iterator<Item = Target<'_>> + '_
         .map(|prop| (prop.resource_type, prop))
         .collect();
 
-    let package_dir = template
-        .path()
-        .parent()
-        .expect("file path must have parent")
-        .to_path_buf();
+    let package_dir = match template.source() {
+        template::Source::Path(path) => path
+            .parent()
+            .expect("file path must have a parent")
+            .to_path_buf(),
+        template::Source::Stdin => PathBuf::from(""),
+    };
 
     template.resources_mut().filter_map(move |resource| {
         let property = packageable_properties.get(resource.resource_type())?;

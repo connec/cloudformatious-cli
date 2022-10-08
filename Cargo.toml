@@ -30,5 +30,5 @@ rusoto_s3 = "0.46.0"
 serde_json = "1.0.85"
 serde_yaml = "0.9.13"
 tempfile = "3.3.0"
-tokio = { version = "1.21.0", features = ["fs", "io-util", "macros"] }
+tokio = { version = "1.21.0", features = ["fs", "io-std", "io-util", "macros"] }
 tokio-util = { version = "0.7.4", features = ["codec"] }
