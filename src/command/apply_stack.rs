@@ -10,7 +10,7 @@ use std::{
 use cloudformatious::{
     ApplyStackError, ApplyStackInput, Capability, CloudFormatious as _, Parameter, TemplateSource,
 };
-use rusoto_cloudformation::Tag;
+use rusoto_cloudformation::{CloudFormationClient, Tag};
 use rusoto_core::Region;
 
 use crate::{
@@ -137,7 +137,7 @@ impl TryFrom<Args> for ApplyStackInput {
 pub async fn main(region: Option<Region>, args: Args) -> Result<(), Error> {
     let quiet = args.quiet;
 
-    let client = crate::get_client(region).await?;
+    let client = crate::get_client(CloudFormationClient::new_with, region).await?;
     let mut apply = client.apply_stack(args.try_into()?);
 
     let change_set = apply.change_set().await.map_err(Error::other)?;

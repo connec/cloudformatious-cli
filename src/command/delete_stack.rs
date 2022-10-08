@@ -5,6 +5,7 @@ use std::{
 };
 
 use cloudformatious::{CloudFormatious as _, DeleteStackError, DeleteStackInput};
+use rusoto_cloudformation::CloudFormationClient;
 use rusoto_core::Region;
 
 use crate::{
@@ -100,7 +101,7 @@ impl TryFrom<Args> for DeleteStackInput {
 pub async fn main(region: Option<Region>, args: Args) -> Result<(), Error> {
     let quiet = args.quiet;
 
-    let client = get_client(region).await?;
+    let client = get_client(CloudFormationClient::new_with, region).await?;
     let mut delete = client.delete_stack(args.try_into()?);
     let sizing = Sizing::default();
 
