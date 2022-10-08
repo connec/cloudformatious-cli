@@ -1,11 +1,4 @@
-use std::{
-    collections::HashMap,
-    convert::{TryFrom, TryInto},
-    ffi::OsStr,
-    fmt, fs,
-    path::PathBuf,
-    str::FromStr,
-};
+use std::{collections::HashMap, convert::TryInto, ffi::OsStr, fmt, path::PathBuf, str::FromStr};
 
 use cloudformatious::{
     ApplyStackError, ApplyStackInput, Capability, CloudFormatious as _, Parameter, TemplateSource,
@@ -15,13 +8,22 @@ use rusoto_core::Region;
 
 use crate::{
     fmt::{print_events, Sizing},
-    Error,
+    package, s3, Error, Template,
 };
 
 /// Apply a CloudFormation template.
 ///
 /// This performs an update or create operation for a target stack. It's not an error for there
 /// to be no changes. The command runs until the stack settles.
+///
+/// # Preprocessing
+///
+/// The template will be pre-processed for references to local paths in the following properties:
+///
+/// - `AWS::Lambda::Function`: `Code`
+///
+/// If local paths are found, they will be zipped and uploaded to S3 based on `--package-bucket`
+/// and `--package-prefix`. `--package-bucket` is required if the template contains any local paths.
 ///
 /// # Output
 ///
@@ -58,6 +60,16 @@ pub struct Args {
     /// The Simple Notification Service (SNS) topic ARNs to publish stack related events.
     #[clap(long)]
     notification_arns: Vec<String>,
+
+    /// The S3 bucket to upload packages to.
+    ///
+    /// Not required unless there are references to local paths in the template.
+    #[clap(long)]
+    package_bucket: Option<String>,
+
+    /// A prefix for any uploaded packages.
+    #[clap(long)]
+    package_prefix: Option<String>,
 
     /// A list of input parameters for the stack.
     ///
@@ -98,47 +110,41 @@ pub struct Args {
     template_path: PathBuf,
 }
 
-impl TryFrom<Args> for ApplyStackInput {
-    type Error = Error;
-    fn try_from(args: Args) -> Result<Self, Self::Error> {
-        let template_path = args.template_path;
-
-        Ok(ApplyStackInput {
-            capabilities: args.capabilities.into_iter().map(Into::into).collect(),
-            client_request_token: args.client_request_token,
-            notification_arns: args.notification_arns,
-            parameters: args.parameters.into_iter().map(Into::into).collect(),
-            resource_types: if args.resource_types.is_empty() {
+impl Args {
+    fn into_input(self, template: &Template) -> ApplyStackInput {
+        ApplyStackInput {
+            capabilities: self.capabilities.into_iter().map(Into::into).collect(),
+            client_request_token: self.client_request_token,
+            notification_arns: self.notification_arns,
+            parameters: self.parameters.into_iter().map(Into::into).collect(),
+            resource_types: if self.resource_types.is_empty() {
                 None
             } else {
-                Some(args.resource_types)
+                Some(self.resource_types)
             },
-            role_arn: args.role_arn,
-            stack_name: args.stack_name.unwrap_or_else(|| {
-                template_path
+            role_arn: self.role_arn,
+            stack_name: self.stack_name.unwrap_or_else(|| {
+                template
+                    .path()
                     .file_stem()
                     .unwrap_or_else(|| OsStr::new(""))
                     .to_string_lossy()
                     .to_string()
             }),
-            tags: args.tags.into_iter().flatten().collect(),
-            template_source: TemplateSource::inline(fs::read_to_string(&template_path).map_err(
-                |error| {
-                    Error::other(format!(
-                        "Invalid template path {:?}: {}",
-                        template_path, error
-                    ))
-                },
-            )?),
-        })
+            tags: self.tags.into_iter().flatten().collect(),
+            template_source: TemplateSource::inline(template.to_string()),
+        }
     }
 }
 
 pub async fn main(region: Option<Region>, args: Args) -> Result<(), Error> {
     let quiet = args.quiet;
 
+    let mut template = Template::open(args.template_path.clone()).await?;
+    preprocess(region.as_ref(), &args, &mut template).await?;
+
     let client = crate::get_client(CloudFormationClient::new_with, region).await?;
-    let mut apply = client.apply_stack(args.try_into()?);
+    let mut apply = client.apply_stack(args.into_input(&template));
 
     let change_set = apply.change_set().await.map_err(Error::other)?;
     let sizing = Sizing::new_for_change_set(&change_set);
@@ -164,6 +170,43 @@ pub async fn main(region: Option<Region>, args: Args) -> Result<(), Error> {
         "{}",
         serde_json::to_string_pretty(&outputs_json).expect("oh no")
     );
+
+    Ok(())
+}
+
+async fn preprocess(
+    region: Option<&Region>,
+    args: &Args,
+    template: &mut Template,
+) -> Result<(), Error> {
+    let mut targets = package::targets(template).peekable();
+    if targets.peek().is_none() {
+        return Ok(());
+    }
+
+    let package_bucket = if let Some(bucket) = args.package_bucket.as_deref() {
+        bucket
+    } else {
+        drop(targets); // it's not clear why this is necessary, but without it the use of `template`
+                       // below is an error
+        return Err(Error::other(format!(
+            concat!(
+                "the `--package-bucket` option is required because template `{}` contains ",
+                "references to local paths that will be packaged"
+            ),
+            template.path().display()
+        )));
+    };
+
+    let client = s3::Client::new(region.cloned()).await?;
+
+    package::process(
+        &client,
+        package_bucket,
+        args.package_prefix.as_deref(),
+        targets,
+    )
+    .await?;
 
     Ok(())
 }
