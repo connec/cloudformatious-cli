@@ -1,15 +1,19 @@
 use std::{
+    borrow::Cow,
     fmt,
     path::{Path, PathBuf},
 };
 
 use serde_yaml::Value as YamlValue;
-use tokio::{fs, io};
+use tokio::{
+    fs,
+    io::{self, AsyncReadExt},
+};
 
 use crate::Error;
 
 pub struct Template {
-    path: PathBuf,
+    path: Option<PathBuf>,
     content: YamlValue,
 }
 
@@ -31,24 +35,43 @@ impl<'t> ResourceMut<'t> {
 
 impl Template {
     pub async fn open(path: PathBuf) -> Result<Self, Error> {
-        let meta = fs::metadata(&path)
-            .await
-            .map_err(ReadError::for_path(&path))?;
-        if !meta.is_file() {
-            return Err(Error::other(ReadError::new(
-                &path,
-                io::Error::new(io::ErrorKind::Other, "not a file"),
-            )));
-        }
+        let (yaml, path) = if path == Path::new("-") {
+            let mut yaml = Vec::new();
+            io::stdin()
+                .read_to_end(&mut yaml)
+                .await
+                .map_err(ReadError::for_source(Path::new("STDIN")))?;
+            (yaml, None)
+        } else {
+            let meta = fs::metadata(&path)
+                .await
+                .map_err(ReadError::for_source(path.as_path()))?;
+            if !meta.is_file() {
+                return Err(Error::other(ReadError::new(
+                    path.as_path(),
+                    io::Error::new(io::ErrorKind::Other, "not a file"),
+                )));
+            }
 
-        let yaml = fs::read(&path).await.map_err(ReadError::for_path(&path))?;
-        let content = serde_yaml::from_slice(&yaml).map_err(ParseError::for_path(&path))?;
+            (
+                fs::read(&path)
+                    .await
+                    .map_err(ReadError::for_source(path.as_path()))?,
+                Some(path),
+            )
+        };
+
+        let content = serde_yaml::from_slice(&yaml).map_err(ParseError::for_source(
+            path.as_deref().unwrap_or_else(|| Path::new("STDIN")),
+        ))?;
 
         Ok(Self { path, content })
     }
 
-    pub fn path(&self) -> &Path {
-        &self.path
+    pub fn source(&self) -> Source {
+        self.path
+            .as_deref()
+            .map_or_else(|| Source::Stdin, Source::from)
     }
 
     pub fn resources_mut(&mut self) -> impl Iterator<Item = ResourceMut<'_>> {
@@ -97,21 +120,54 @@ impl fmt::Display for Template {
 }
 
 #[derive(Debug)]
+pub enum Source<'a> {
+    Path(Cow<'a, Path>),
+    Stdin,
+}
+
+impl Source<'_> {
+    fn into_static(self) -> Source<'static> {
+        match self {
+            Source::Path(Cow::Borrowed(path)) => Source::Path(Cow::Owned(path.to_owned())),
+            Source::Path(Cow::Owned(path)) => Source::Path(path.into()),
+            Source::Stdin => Source::Stdin,
+        }
+    }
+}
+
+impl<'a> From<&'a Path> for Source<'a> {
+    fn from(path: &'a Path) -> Self {
+        Self::Path(path.into())
+    }
+}
+
+impl fmt::Display for Source<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Source::Path(path) => write!(f, "{}", path.display()),
+            Source::Stdin => write!(f, "STDIN"),
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct ReadError {
-    path: PathBuf,
+    template_source: Source<'static>,
     error: io::Error,
 }
 
 impl ReadError {
-    fn new(path: &Path, error: io::Error) -> Self {
+    fn new<'a>(template_source: impl Into<Source<'a>> + 'a, error: io::Error) -> Self {
         Self {
-            path: path.to_path_buf(),
+            template_source: template_source.into().into_static(),
             error,
         }
     }
 
-    fn for_path(path: &Path) -> impl FnOnce(io::Error) -> Self + '_ {
-        move |error| Self::new(path, error)
+    fn for_source<'a>(
+        template_source: impl Into<Source<'a>> + 'a,
+    ) -> impl FnOnce(io::Error) -> Self + 'a {
+        move |error| Self::new(template_source, error)
     }
 }
 
@@ -120,8 +176,7 @@ impl fmt::Display for ReadError {
         write!(
             f,
             "couldn't read template `{}` due to: {}",
-            self.path.display(),
-            self.error
+            self.template_source, self.error
         )
     }
 }
@@ -140,14 +195,16 @@ impl From<ReadError> for Error {
 
 #[derive(Debug)]
 pub struct ParseError {
-    path: PathBuf,
+    template_source: Source<'static>,
     error: serde_yaml::Error,
 }
 
 impl ParseError {
-    fn for_path(path: &Path) -> impl FnOnce(serde_yaml::Error) -> Self + '_ {
+    fn for_source<'a>(
+        template_source: impl Into<Source<'a>> + 'a,
+    ) -> impl FnOnce(serde_yaml::Error) -> Self + 'a {
         move |error| Self {
-            path: path.to_path_buf(),
+            template_source: template_source.into().into_static(),
             error,
         }
     }
@@ -158,8 +215,7 @@ impl fmt::Display for ParseError {
         write!(
             f,
             "invalid template `{}`: {}",
-            self.path.display(),
-            self.error
+            self.template_source, self.error
         )
     }
 }
