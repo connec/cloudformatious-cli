@@ -2,13 +2,16 @@ mod client;
 mod command;
 mod error;
 mod fmt;
+mod package;
+mod s3;
+mod template;
 
 use std::process;
 
 use clap::Parser;
 use rusoto_core::Region;
 
-use self::{client::get_client, error::Error};
+use self::{client::get_client, error::Error, template::Template};
 
 /// A CloudFormation CLI that won't make you cry.
 ///

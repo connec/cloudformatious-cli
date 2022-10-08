@@ -1,6 +1,5 @@
 use std::{env, fmt, time::Duration};
 
-use rusoto_cloudformation::CloudFormationClient;
 use rusoto_core::{HttpClient, Region};
 use rusoto_credential::{
     AutoRefreshingProvider, ChainProvider, ProfileProvider, ProvideAwsCredentials as _,
@@ -11,7 +10,10 @@ use crate::Error;
 const MISSING_REGION: &str = "Unable CompletionsArgs, DeleteStack
 You can set it in your profile, assign `AWS_REGION`, or supply `--region`.";
 
-pub async fn get_client(region: Option<Region>) -> Result<CloudFormationClient, Error> {
+pub async fn get_client<C>(
+    ctor: impl FnOnce(HttpClient, AutoRefreshingProvider<aws_sso_flow::ChainProvider>, Region) -> C,
+    region: Option<Region>,
+) -> Result<C, Error> {
     let region = region
         .map(Ok)
         .or_else(get_region)
@@ -38,7 +40,7 @@ pub async fn get_client(region: Option<Region>) -> Result<CloudFormationClient, 
     // Proactively fetch credentials so we get earlier errors.
     credentials.credentials().await.map_err(Error::other)?;
 
-    Ok(CloudFormationClient::new_with(client, credentials, region))
+    Ok(ctor(client, credentials, region))
 }
 
 fn get_region() -> Option<Result<Region, Box<dyn std::error::Error>>> {
