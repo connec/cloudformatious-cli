@@ -1,6 +1,6 @@
-pub mod apply_stack;
-pub mod completions;
-pub mod delete_stack;
+mod apply_stack;
+mod completions;
+mod delete_stack;
 
 use rusoto_core::Region;
 
