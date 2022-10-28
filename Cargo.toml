@@ -14,21 +14,21 @@ path = "src/main.rs"
 [dependencies]
 async_zip = { version = "0.0.9", default-features = false, features = ["deflate"] }
 atty = "0.2.14"
-aws_sso_flow = { version = "0.2.0", default-features = false, features = ["native-tls", "rusoto"] }
+aws-config = { version = "0.49.0", default-features = false, features = ["client-hyper", "native-tls", "rt-tokio"] }
+aws-sdk-s3 = { version = "0.19", default-features = false, features = ["native-tls", "rt-tokio"] }
+aws-types = "0.49.0"
+aws_sso_flow = { version = "0.3.1", default-features = false, features = ["aws-sdk", "native-tls"] }
 base64 = "0.13.0"
 chrono = { version = "0.4.22", default-features = false }
 clap = { version = "3.2.20", features = ["derive", "env"] }
 clap_complete = "3.2.4"
-cloudformatious = "0.1.0"
+cloudformatious = "0.2.0"
 colored = "2.0.0"
 futures-util = "0.3.24"
+hyper = { version = "0.14.20", features = ["stream"] }
 md5 = "0.7.0"
-rusoto_cloudformation = "0.46.0"
-rusoto_core = "0.46.0"
-rusoto_credential = "0.46.0"
-rusoto_s3 = "0.46.0"
 serde_json = "1.0.85"
 serde_yaml = "0.9.13"
 tempfile = "3.3.0"
-tokio = { version = "1.21.0", features = ["fs", "io-std", "io-util", "macros"] }
+tokio = { version = "1.21.0", features = ["fs", "io-std", "io-util", "macros", "rt-multi-thread"] }
 tokio-util = { version = "0.7.4", features = ["codec"] }

@@ -1,8 +1,7 @@
 use std::{convert::TryInto, path::Path};
 
+use aws_types::region::Region;
 use futures_util::{StreamExt, TryStreamExt};
-use rusoto_core::Region;
-use rusoto_s3::{HeadObjectRequest, PutObjectRequest, S3Client, S3};
 use tokio::{
     fs::File,
     io::{AsyncSeekExt, BufReader},
@@ -12,13 +11,13 @@ use tokio_util::codec::{BytesCodec, FramedRead};
 use crate::{client::get_client, Error};
 
 pub struct Client {
-    inner: rusoto_s3::S3Client,
+    inner: aws_sdk_s3::Client,
 }
 
 impl Client {
-    pub async fn new(region: Option<Region>) -> Result<Self, Error> {
-        let inner = get_client(S3Client::new_with, region).await?;
-        Ok(Self { inner })
+    pub async fn new(region: Option<Region>) -> Self {
+        let inner = get_client(aws_sdk_s3::Client::new, region).await;
+        Self { inner }
     }
 
     pub async fn upload<'a>(&self, request: UploadRequest<'a>) -> Result<UploadOutput, Error> {
@@ -47,18 +46,17 @@ impl Client {
 
         let exists = self
             .inner
-            .head_object(HeadObjectRequest {
-                bucket: request.bucket.to_owned(),
-                key: key.clone(),
-                ..Default::default()
-            })
+            .head_object()
+            .bucket(request.bucket)
+            .key(&key)
+            .send()
             .await
             .map(|_| true)
             .or_else({
                 let bucket = &request.bucket;
                 let key = &key;
                 move |error| match error {
-                    rusoto_core::RusotoError::Unknown(res) if res.status.as_u16() == 404 => {
+                    aws_sdk_s3::types::SdkError::ServiceError { err, .. } if err.is_not_found() => {
                         Ok(false)
                     }
                     error => Err(Error::other(format!(
@@ -75,21 +73,17 @@ impl Client {
             .await
             .map_err(|error| Error::other(format!("couldn't read upload package: {error}")))?;
 
+        let body =
+            hyper::Body::wrap_stream(FramedRead::new(BufReader::new(file), BytesCodec::new()));
+
         self.inner
-            .put_object(PutObjectRequest {
-                body: Some(rusoto_s3::StreamingBody::new_with_size(
-                    FramedRead::new(BufReader::new(file), BytesCodec::new())
-                        .map_ok(|chunk| chunk.freeze()),
-                    meta.len()
-                        .try_into()
-                        .expect("file is too large for platform"),
-                )),
-                bucket: request.bucket.to_owned(),
-                content_length: Some(meta.len().try_into().expect("file is insanely large")),
-                content_md5: Some(base64::encode(&content_md5.0)),
-                key: key.clone(),
-                ..Default::default()
-            })
+            .put_object()
+            .body(body.into())
+            .bucket(request.bucket)
+            .content_length(meta.len().try_into().expect("file is insanely large"))
+            .content_md5(base64::encode(&content_md5.0))
+            .key(&key)
+            .send()
             .await
             .map_err(|error| {
                 Error::other(format!(

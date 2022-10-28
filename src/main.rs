@@ -6,12 +6,12 @@ mod package;
 mod s3;
 mod template;
 
-use std::process;
+use std::{convert::Infallible, process};
 
+use aws_types::region::Region;
 use clap::Parser;
-use rusoto_core::Region;
 
-use self::{client::get_client, error::Error, template::Template};
+use self::{error::Error, template::Template};
 
 /// A CloudFormation CLI that won't make you cry.
 ///
@@ -23,7 +23,7 @@ use self::{client::get_client, error::Error, template::Template};
 #[clap(name = "cloudformatious")]
 struct Args {
     /// The region to use. Overrides config/env settings.
-    #[clap(long, env = "AWS_REGION")]
+    #[clap(long, env = "AWS_REGION", value_parser = parse_region)]
     region: Option<Region>,
 
     #[clap(subcommand)]
@@ -42,4 +42,8 @@ async fn main() {
             Error::Other(_) => 1,
         });
     }
+}
+
+fn parse_region(region: &str) -> Result<Region, Infallible> {
+    Ok(Region::new(region.to_owned()))
 }

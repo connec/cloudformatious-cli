@@ -3,7 +3,7 @@ mod completions;
 mod delete_stack;
 mod package;
 
-use rusoto_core::Region;
+use aws_types::region::Region;
 
 use crate::Error;
 

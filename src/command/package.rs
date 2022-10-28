@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use rusoto_core::Region;
+use aws_types::region::Region;
 
 use crate::{package, s3, Error, Template};
 
@@ -30,7 +30,7 @@ pub struct Args {
 }
 
 pub async fn main(region: Option<Region>, args: Args) -> Result<(), Error> {
-    let client = s3::Client::new(region).await?;
+    let client = s3::Client::new(region).await;
     let mut template = Template::open(args.template_path).await?;
 
     let targets = package::targets(&mut template);
