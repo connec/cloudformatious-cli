@@ -4,12 +4,11 @@ use std::{
     path::PathBuf,
 };
 
-use cloudformatious::{CloudFormatious as _, DeleteStackError, DeleteStackInput};
-use rusoto_cloudformation::CloudFormationClient;
-use rusoto_core::Region;
+use aws_types::region::Region;
+use cloudformatious::{self, DeleteStackError, DeleteStackInput};
 
 use crate::{
-    client::get_client,
+    client::get_config,
     fmt::{print_events, Sizing},
     Error,
 };
@@ -101,7 +100,8 @@ impl TryFrom<Args> for DeleteStackInput {
 pub async fn main(region: Option<Region>, args: Args) -> Result<(), Error> {
     let quiet = args.quiet;
 
-    let client = get_client(CloudFormationClient::new_with, region).await?;
+    let config = get_config(region).await;
+    let client = cloudformatious::Client::new(&config);
     let mut delete = client.delete_stack(args.try_into()?);
     let sizing = Sizing::default();
 

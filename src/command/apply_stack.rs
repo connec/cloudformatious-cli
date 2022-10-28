@@ -1,12 +1,12 @@
 use std::{collections::HashMap, convert::TryInto, ffi::OsStr, fmt, path::PathBuf, str::FromStr};
 
+use aws_types::region::Region;
 use cloudformatious::{
-    ApplyStackError, ApplyStackInput, Capability, CloudFormatious as _, Parameter, TemplateSource,
+    self, ApplyStackError, ApplyStackInput, Capability, Parameter, Tag, TemplateSource,
 };
-use rusoto_cloudformation::{CloudFormationClient, Tag};
-use rusoto_core::Region;
 
 use crate::{
+    client::get_config,
     fmt::{print_events, Sizing},
     package, s3, template, Error, Template,
 };
@@ -145,7 +145,8 @@ pub async fn main(region: Option<Region>, args: Args) -> Result<(), Error> {
     let mut template = Template::open(args.template_path.clone()).await?;
     preprocess(region.as_ref(), &args, &mut template).await?;
 
-    let client = crate::get_client(CloudFormationClient::new_with, region).await?;
+    let config = get_config(region).await;
+    let client = cloudformatious::Client::new(&config);
     let mut apply = client.apply_stack(args.into_input(&template));
 
     let change_set = apply.change_set().await.map_err(Error::other)?;
@@ -200,7 +201,7 @@ async fn preprocess(
         )));
     };
 
-    let client = s3::Client::new(region.cloned()).await?;
+    let client = s3::Client::new(region.cloned()).await;
 
     package::process(
         &client,
