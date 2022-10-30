@@ -50,6 +50,7 @@ jobs:
           set -euo pipefail
 
           echo "$OSXCROSS_PATH/target/bin" >> "$GITHUB_PATH"
+          echo "CC_$(echo '${{ matrix.arch }}_${{ matrix.os }}' | tr '-' '_')"="$OSXCROSS_PATH/target/bin/o64-clang" >> $GITHUB_ENV
           echo "CARGO_TARGET_$(echo '${{ matrix.arch }}' | tr '[:lower:]' '[:upper:]')_APPLE_DARWIN_LINKER=$(find "$OSXCROSS_PATH/target/bin" -name '${{ matrix.arch }}-apple-darwin*-clang' -exec basename {} \;)" >> $GITHUB_ENV
           echo "CARGO_TARGET_$(echo '${{ matrix.arch }}' | tr '[:lower:]' '[:upper:]')_APPLE_DARWIN_RUSTFLAGS=-Car=$(find "$OSXCROSS_PATH/target/bin" -name '${{ matrix.arch }}-apple-darwin*-ar' -exec basename {} \;),-Clink-arg=-undefined,-Clink-arg=dynamic_lookup" >> $GITHUB_ENV
         env:
