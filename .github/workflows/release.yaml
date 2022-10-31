@@ -65,7 +65,7 @@ jobs:
       - uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --release --target ${{ matrix.arch }}-${{ matrix.os }}
+          args: --locked --release --target ${{ matrix.arch }}-${{ matrix.os }}
       - name: Upload to release
         run: |
           set -euo pipefail
