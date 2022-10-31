@@ -72,9 +72,7 @@ pub struct Args {
     package_prefix: Option<String>,
 
     /// A list of input parameters for the stack.
-    ///
-    /// Parameters should be supplied as `key=value` strings.
-    #[clap(long, num_args(1..))]
+    #[clap(long, num_args(1..), value_name("KEY=VALUE"))]
     parameters: Vec<ParameterArg>,
 
     /// Disable informational output to STDERR.
@@ -98,8 +96,8 @@ pub struct Args {
     /// Key-value pairs to associate with this stack.
     ///
     /// Tags should be supplied either as `key=value` strings and/or as a JSON object (e.g.
-    /// `{"key1": "value1", "key2": "value2"}). JSON is tried first.
-    #[clap(long, num_args(1..))]
+    /// `{"key1": "value1", "key2": "value2"}).
+    #[clap(long, num_args(1..), value_name("KEY=VALUE|JSON"))]
     tags: Vec<TagArg>,
 
     /// Path to the template to be applied.
