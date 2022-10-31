@@ -15,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: Cargo cache
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         with:
           key: ${{ github.sha }}
           path: |
@@ -35,7 +35,7 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: Cargo cache
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         with:
           key: ${{ github.sha }}
           path: |
@@ -45,7 +45,7 @@ jobs:
             ~/.cargo/registry/index
             Cargo.lock
       - name: Check cache
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         with:
           key: check-${{ hashFiles('Cargo.lock') }}
           path: target
@@ -58,7 +58,7 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: Cargo cache
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         with:
           key: ${{ github.sha }}
           path: |
@@ -68,7 +68,7 @@ jobs:
             ~/.cargo/registry/index
             Cargo.lock
       - name: Check cache
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         with:
           key: check-${{ hashFiles('Cargo.lock') }}
           path: target
@@ -81,7 +81,7 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: Cargo cache
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         with:
           key: ${{ github.sha }}
           path: |
@@ -91,7 +91,7 @@ jobs:
             ~/.cargo/registry/index
             Cargo.lock
       - name: Check cache
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         with:
           key: check-${{ hashFiles('Cargo.lock') }}
           path: target
@@ -104,7 +104,7 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: Cargo cache
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         with:
           key: ${{ github.sha }}
           path: |
@@ -114,7 +114,7 @@ jobs:
             ~/.cargo/registry/index
             Cargo.lock
       - name: Test cache
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         with:
           key: test-${{ hashFiles('Cargo.lock') }}
           path: target
