@@ -50,7 +50,7 @@ use crate::{
 #[derive(Debug, clap::Parser)]
 pub struct Args {
     /// Capabilities to explicitly acknowledge.
-    #[clap(long)]
+    #[clap(long, num_args(1..))]
     capabilities: Vec<CapabilityArg>,
 
     /// A unique identifier for this `apply_stack` operation.
@@ -58,7 +58,7 @@ pub struct Args {
     client_request_token: Option<String>,
 
     /// The Simple Notification Service (SNS) topic ARNs to publish stack related events.
-    #[clap(long)]
+    #[clap(long, num_args(1..))]
     notification_arns: Vec<String>,
 
     /// The S3 bucket to upload packages to.
@@ -74,7 +74,7 @@ pub struct Args {
     /// A list of input parameters for the stack.
     ///
     /// Parameters should be supplied as `key=value` strings.
-    #[clap(long)]
+    #[clap(long, num_args(1..))]
     parameters: Vec<ParameterArg>,
 
     /// Disable informational output to STDERR.
@@ -83,7 +83,7 @@ pub struct Args {
 
     /// The template resource types that you have permissions to work with for this `apply_stack`
     /// operation, such as `AWS::EC2::Instance`, `AWS::EC2::*`, or `Custom::MyCustomInstance`.
-    #[clap(long)]
+    #[clap(long, num_args(1..))]
     resource_types: Vec<String>,
 
     /// The Amazon Resource Name (ARN) of an AWS Identity And Access Management (IAM) role that AWS
@@ -103,7 +103,7 @@ pub struct Args {
     ///
     /// Tags should be supplied either as `key=value` strings and/or as a JSON object (e.g.
     /// `{"key1": "value1", "key2": "value2"}). JSON is tried first.
-    #[clap(long)]
+    #[clap(long, num_args(1..))]
     tags: Vec<TagArg>,
 
     /// Path to the template to be applied.
