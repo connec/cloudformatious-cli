@@ -52,7 +52,7 @@ pub struct Args {
     /// For stacks in the `DELETE_FAILED` state, a list of resource logical IDs that are associated
     /// with the resources you want to retain. During deletion, AWS CloudFormation deletes the stack
     /// but does not delete the retained resources.
-    #[clap(long)]
+    #[clap(long, num_args(1..))]
     retain_resources: Vec<String>,
 
     /// The Amazon Resource Name (ARN) of an AWS Identity And Access Management (IAM) role that AWS
