@@ -14,10 +14,10 @@ path = "src/main.rs"
 [dependencies]
 async_zip = { version = "0.0.9", default-features = false, features = ["deflate"] }
 atty = "0.2.14"
-aws-config = { version = "0.49.0", default-features = false, features = ["client-hyper", "native-tls", "rt-tokio"] }
-aws-sdk-s3 = { version = "0.19", default-features = false, features = ["native-tls", "rt-tokio"] }
+aws-config = { version = "0.49.0", default-features = false, features = ["client-hyper", "rt-tokio", "rustls"] }
+aws-sdk-s3 = { version = "0.19", default-features = false, features = ["rt-tokio", "rustls"] }
 aws-types = "0.49.0"
-aws_sso_flow = { version = "0.3.1", default-features = false, features = ["aws-sdk", "native-tls"] }
+aws_sso_flow = { version = "0.3.1", default-features = false, features = ["aws-sdk", "rustls"] }
 base64 = "0.13.0"
 chrono = { version = "0.4.22", default-features = false }
 clap = { version = "3.2.20", features = ["derive", "env"] }
