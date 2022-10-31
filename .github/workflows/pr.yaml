@@ -5,6 +5,10 @@ on:
     branches:
       - master
 
+  # Run on push to master as well, to warm caches for future branches
+  push:
+    branches: master
+
 env:
   RUSTFLAGS: -D warnings
   RUSTDOCFLAGS: -D warnings
