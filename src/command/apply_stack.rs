@@ -101,6 +101,7 @@ pub struct Args {
     tags: Vec<TagArg>,
 
     /// Path to the template to be applied.
+    #[clap(long)]
     template_path: PathBuf,
 }
 
