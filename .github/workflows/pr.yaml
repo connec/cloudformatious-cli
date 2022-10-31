@@ -50,7 +50,7 @@ jobs:
           key: check-${{ hashFiles('Cargo.lock') }}
           path: target
       - name: Check
-        run: cargo check --all-targets
+        run: cargo check --all-targets --locked
 
   clippy:
     runs-on: ubuntu-20.04
@@ -73,7 +73,7 @@ jobs:
           key: check-${{ hashFiles('Cargo.lock') }}
           path: target
       - name: Clippy
-        run: cargo clippy --all-targets
+        run: cargo clippy --all-targets --locked
 
   doc-check:
     runs-on: ubuntu-20.04
@@ -96,7 +96,7 @@ jobs:
           key: check-${{ hashFiles('Cargo.lock') }}
           path: target
       - name: Doc check
-        run: cargo doc --no-deps
+        run: cargo doc --no-deps --locked
 
   test:
     runs-on: ubuntu-20.04
@@ -119,4 +119,4 @@ jobs:
           key: test-${{ hashFiles('Cargo.lock') }}
           path: target
       - name: Test
-        run: cargo test
+        run: cargo test --locked
