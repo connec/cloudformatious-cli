@@ -1,4 +1,4 @@
-use std::{collections::HashMap, convert::TryInto, ffi::OsStr, fmt, path::PathBuf, str::FromStr};
+use std::{collections::HashMap, convert::TryInto, fmt, path::PathBuf, str::FromStr};
 
 use aws_types::region::Region;
 use cloudformatious::{
@@ -8,7 +8,7 @@ use cloudformatious::{
 use crate::{
     client::get_config,
     fmt::{print_events, Sizing},
-    package, s3, template, Error, Template,
+    package, s3, Error, Template,
 };
 
 /// Apply a CloudFormation template.
@@ -92,12 +92,8 @@ pub struct Args {
     role_arn: Option<String>,
 
     /// The name that is associated with the stack.
-    ///
-    /// If this isn't set explicitly then the file name of the `template_path` is used as the stack
-    /// name. E.g. if `template_path` is `deployment/cloudformation/my-stack.yaml` then the default
-    /// stack name would be `my-stack`.
-    #[clap(long, required_if_eq("template-path", "-"))]
-    stack_name: Option<String>,
+    #[clap(long)]
+    stack_name: String,
 
     /// Key-value pairs to associate with this stack.
     ///
@@ -123,16 +119,7 @@ impl Args {
                 Some(self.resource_types)
             },
             role_arn: self.role_arn,
-            stack_name: self.stack_name.unwrap_or_else(|| match template.source() {
-                template::Source::Path(path) => path
-                    .file_stem()
-                    .unwrap_or_else(|| OsStr::new(""))
-                    .to_string_lossy()
-                    .to_string(),
-                template::Source::Stdin => {
-                    panic!("expected stack name to be set if template source isn't a file")
-                }
-            }),
+            stack_name: self.stack_name,
             tags: self.tags.into_iter().flatten().collect(),
             template_source: TemplateSource::inline(template.to_string()),
         }

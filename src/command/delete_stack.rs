@@ -1,8 +1,4 @@
-use std::{
-    convert::{TryFrom, TryInto},
-    ffi::OsStr,
-    path::PathBuf,
-};
+use std::convert::{TryFrom, TryInto};
 
 use aws_types::region::Region;
 use cloudformatious::{self, DeleteStackError, DeleteStackInput};
@@ -62,21 +58,12 @@ pub struct Args {
 
     /// The name of the stack to delete.
     #[clap(long)]
-    stack_name: Option<String>,
-
-    /// The path to the template whose associated stack will be deleted.
-    ///
-    /// The stack to delete is determined from the file name of `template_path`. E.g. if
-    /// `template_path` is `deployment/cloudformation/my-stack.yaml` then the default `my-stack`
-    /// will be deleted.
-    #[clap(required_unless_present = "stack-name")]
-    template_path: Option<PathBuf>,
+    stack_name: String,
 }
 
 impl TryFrom<Args> for DeleteStackInput {
     type Error = Error;
     fn try_from(args: Args) -> Result<Self, Self::Error> {
-        let template_path = args.template_path;
         Ok(DeleteStackInput {
             client_request_token: args.client_request_token,
             retain_resources: if args.retain_resources.is_empty() {
@@ -85,14 +72,7 @@ impl TryFrom<Args> for DeleteStackInput {
                 Some(args.retain_resources)
             },
             role_arn: args.role_arn,
-            stack_name: args.stack_name.unwrap_or_else(|| {
-                template_path
-                    .expect("bug: delete_stack::Args without stack_name or template_path")
-                    .file_stem()
-                    .unwrap_or_else(|| OsStr::new(""))
-                    .to_string_lossy()
-                    .to_string()
-            }),
+            stack_name: args.stack_name,
         })
     }
 }

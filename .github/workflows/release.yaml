@@ -26,7 +26,7 @@ jobs:
       matrix:
         arch: [aarch64, x86_64]
         os: [apple-darwin, unknown-linux-gnu]
-    name: Build binary (${{ matrix.os }} ${{ matrix.arch }})
+    name: Build binary (${{ matrix.arch }}-${{ matrix.os }})
     runs-on: ubuntu-latest
     env:
       SDK_VERSION: '12.3'
