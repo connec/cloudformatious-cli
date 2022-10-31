@@ -216,7 +216,7 @@ async fn preprocess(
 
 /// Newtype for parsing capabilities.
 // TODO: use impl Deserialize upstream and use `Capability` directly.
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct CapabilityArg(Capability);
 
 impl FromStr for CapabilityArg {
@@ -257,7 +257,7 @@ impl fmt::Display for InvalidCapability {
 impl std::error::Error for InvalidCapability {}
 
 /// Newtype for parsing parameters.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ParameterArg(Parameter);
 
 impl FromStr for ParameterArg {
@@ -296,7 +296,7 @@ impl fmt::Display for InvalidParameter {
 impl std::error::Error for InvalidParameter {}
 
 /// Newtype for parsing tags.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum TagArg {
     KeyValue(Tag),
     Json(Vec<Tag>),
