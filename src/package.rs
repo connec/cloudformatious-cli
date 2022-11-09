@@ -139,15 +139,25 @@ async fn package_zip(target: &Target<'_>) -> Result<File, Error> {
     );
     let mut writer = ZipFileWriter::new(&mut zip);
 
-    if metadata.is_file() {
-        // Add the single file to the ZIP with the same file name
-        let file_name = target
-            .path
+    let paths = if metadata.is_file() {
+        vec![Ok(target.path.clone())]
+    } else if metadata.is_dir() {
+        let path = target.path.clone();
+        tokio::task::spawn_blocking(|| scandir(path))
+            .await
+            .or_else(|error| upload_err(target, format!("couldn't read: {error}")))?
+    } else {
+        return upload_err(target, "not a file or directory");
+    };
+
+    for path in paths {
+        let path = path.or_else(|error| upload_err(target, format!("couldn't read: {error}")))?;
+
+        let file_name = path
             .file_name()
             .expect("file must have file name")
             .to_string_lossy()
             .into_owned();
-
         let mut entry_writer = writer
             .write_entry_stream(
                 ZipEntryBuilder::new(file_name, Compression::Deflate)
@@ -158,7 +168,7 @@ async fn package_zip(target: &Target<'_>) -> Result<File, Error> {
             .or_else(|error| upload_err(target, format!("couldn't write: {error}",)))?;
 
         let mut file = io::BufReader::new(
-            File::open(&target.path)
+            File::open(path)
                 .await
                 .or_else(|error| upload_err(target, format!("couldn't open: {error}")))?,
         );
@@ -169,10 +179,6 @@ async fn package_zip(target: &Target<'_>) -> Result<File, Error> {
             .close()
             .await
             .or_else(|error| upload_err(target, format!("couldn't write: {error}")))?;
-    } else if metadata.is_dir() {
-        todo!()
-    } else {
-        return upload_err(target, "not a file or directory");
     }
 
     writer
@@ -184,6 +190,39 @@ async fn package_zip(target: &Target<'_>) -> Result<File, Error> {
         .await
         .or_else(|error| upload_err(target, format!("read error: {error}")))?;
     Ok(zip)
+}
+
+fn scandir(path: PathBuf) -> Vec<io::Result<PathBuf>> {
+    let entries = match std::fs::read_dir(&path) {
+        Ok(entries) => entries,
+        Err(error) => return vec![Err(error)],
+    };
+
+    entries.fold(Vec::new(), |mut paths, entry| {
+        let entry_path = match entry {
+            Ok(entry) => entry.path(),
+            Err(error) => {
+                paths.push(Err(error));
+                return paths;
+            }
+        };
+
+        let metadata = match std::fs::metadata(&entry_path) {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                paths.push(Err(error));
+                return paths;
+            }
+        };
+
+        if metadata.is_dir() {
+            paths.extend(scandir(entry_path));
+        } else {
+            paths.push(Ok(entry_path));
+        }
+
+        paths
+    })
 }
 
 fn upload_err<T>(target: &Target, error: impl fmt::Display) -> Result<T, Error> {
