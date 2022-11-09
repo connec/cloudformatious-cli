@@ -18,23 +18,42 @@ pub struct PackageableProperty {
     s3_ref: fn(String, s3::UploadOutput) -> serde_yaml::Value,
 }
 
-const PACKAGEABLE_PROPERTIES: &[PackageableProperty] = &[PackageableProperty {
-    resource_type: "AWS::Lambda::Function",
-    path: &["Code"],
-    s3_ref: |bucket, upload| {
-        serde_yaml::Mapping::from_iter([
-            (
-                serde_yaml::Value::String("S3Bucket".to_string()),
-                serde_yaml::Value::String(bucket),
-            ),
-            (
-                serde_yaml::Value::String("S3Key".to_string()),
-                serde_yaml::Value::String(upload.key),
-            ),
-        ])
-        .into()
+const PACKAGEABLE_PROPERTIES: &[PackageableProperty] = &[
+    PackageableProperty {
+        resource_type: "AWS::Lambda::Function",
+        path: &["Code"],
+        s3_ref: |bucket, upload| {
+            serde_yaml::Mapping::from_iter([
+                (
+                    serde_yaml::Value::String("S3Bucket".to_string()),
+                    serde_yaml::Value::String(bucket),
+                ),
+                (
+                    serde_yaml::Value::String("S3Key".to_string()),
+                    serde_yaml::Value::String(upload.key),
+                ),
+            ])
+            .into()
+        },
     },
-}];
+    PackageableProperty {
+        resource_type: "AWS::Serverless::Function",
+        path: &["CodeUri"],
+        s3_ref: |bucket, upload| {
+            serde_yaml::Mapping::from_iter([
+                (
+                    serde_yaml::Value::String("Bucket".to_string()),
+                    serde_yaml::Value::String(bucket),
+                ),
+                (
+                    serde_yaml::Value::String("Key".to_string()),
+                    serde_yaml::Value::String(upload.key),
+                ),
+            ])
+            .into()
+        },
+    },
+];
 
 pub struct Target<'y> {
     resource_id: &'y str,
