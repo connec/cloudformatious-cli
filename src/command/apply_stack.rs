@@ -2,8 +2,10 @@ use std::{collections::HashMap, convert::TryInto, fmt, path::PathBuf, str::FromS
 
 use aws_types::region::Region;
 use cloudformatious::{
-    self, ApplyStackError, ApplyStackInput, Capability, Parameter, Tag, TemplateSource,
+    self, ApplyStackError, ApplyStackInput, BlockedStackStatus, Capability, Client,
+    DeleteStackError, DeleteStackInput, Parameter, Tag, TemplateSource,
 };
+use futures_util::TryFutureExt;
 
 use crate::{
     client::get_config,
@@ -134,22 +136,46 @@ pub async fn main(region: Option<Region>, args: Args) -> Result<(), Error> {
 
     let config = get_config(region).await;
     let client = cloudformatious::Client::new(&config);
-    let mut apply = client.apply_stack(args.into_input(&template));
+    let input = args.into_input(&template);
+    let mut apply = client.apply_stack(input.clone());
 
-    let change_set = apply.change_set().await.map_err(Error::other)?;
+    let change_set = match apply.change_set().await {
+        Ok(change_set) => Ok(change_set),
+        Err(ApplyStackError::Blocked { status }) => {
+            recover(status, &client, &input, quiet).await?;
+
+            apply = client.apply_stack(input.clone());
+            apply.change_set().await.map_err(Error::other)
+        }
+        Err(error) => Err(Error::other(error)),
+    }?;
     let sizing = Sizing::new_for_change_set(&change_set);
 
     if !quiet {
         print_events(&sizing, apply.events()).await;
     }
 
-    let output = apply.await.map_err(|error| match error {
-        ApplyStackError::Warning { warning, .. } => Error::Warning(warning),
-        ApplyStackError::Failure(failure) => Error::Failure(failure),
-        ApplyStackError::Blocked { .. }
-        | ApplyStackError::CloudFormationApi(_)
-        | ApplyStackError::CreateChangeSetFailed { .. } => Error::other(error),
-    })?;
+    let output = apply
+        .or_else(|error| async {
+            let ApplyStackError::Blocked { status } = error else {
+                return Err(Error::other(error));
+            };
+
+            recover(status, &client, &input, quiet).await?;
+
+            let mut apply = client.apply_stack(input);
+
+            if !quiet {
+                print_events(&sizing, apply.events()).await;
+            }
+
+            apply.await.map_err(|error| match error {
+                ApplyStackError::Warning { warning, .. } => Error::Warning(warning),
+                ApplyStackError::Failure(failure) => Error::Failure(failure),
+                error => Error::other(error),
+            })
+        })
+        .await?;
 
     let outputs_json: serde_json::Value = output
         .outputs
@@ -200,6 +226,41 @@ async fn preprocess(
     .await?;
 
     Ok(())
+}
+
+async fn recover(
+    status: BlockedStackStatus,
+    client: &Client,
+    input: &ApplyStackInput,
+    quiet: bool,
+) -> Result<(), Error> {
+    match status {
+        BlockedStackStatus::RollbackComplete => {
+            eprintln!("Stack is in state {} – deleting it first", status);
+            // From ROLLBACK_COMPLETE all we can do is delete the stack.
+            let mut delete_input = DeleteStackInput::new(&input.stack_name);
+            delete_input.role_arn = input.role_arn.clone();
+
+            let mut delete = client.delete_stack(delete_input);
+            let sizing = Sizing::default();
+
+            if !quiet {
+                print_events(&sizing, delete.events()).await;
+            }
+
+            delete.await.map_err(|error| match error {
+                DeleteStackError::Warning(warning) => Error::Warning(warning),
+                DeleteStackError::Failure(failure) => Error::Failure(failure),
+                DeleteStackError::CloudFormationApi(_) => Error::other(error),
+            })?;
+
+            Ok(())
+        }
+        status => Err(Error::other(format!(
+            "Can't apply stack in block status {}",
+            status
+        ))),
+    }
 }
 
 /// Newtype for parsing capabilities.
