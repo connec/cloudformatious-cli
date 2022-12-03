@@ -110,6 +110,7 @@ impl Args {
         ApplyStackInput {
             capabilities: self.capabilities.into_iter().map(Into::into).collect(),
             client_request_token: self.client_request_token,
+            disable_rollback: false,
             notification_arns: self.notification_arns,
             parameters: self.parameters.into_iter().map(Into::into).collect(),
             resource_types: if self.resource_types.is_empty() {
@@ -145,8 +146,9 @@ pub async fn main(region: Option<Region>, args: Args) -> Result<(), Error> {
     let output = apply.await.map_err(|error| match error {
         ApplyStackError::Warning { warning, .. } => Error::Warning(warning),
         ApplyStackError::Failure(failure) => Error::Failure(failure),
-        ApplyStackError::CloudFormationApi(_) => Error::other(error),
-        ApplyStackError::CreateChangeSetFailed { .. } => Error::other(error),
+        ApplyStackError::Blocked { .. }
+        | ApplyStackError::CloudFormationApi(_)
+        | ApplyStackError::CreateChangeSetFailed { .. } => Error::other(error),
     })?;
 
     let outputs_json: serde_json::Value = output

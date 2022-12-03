@@ -621,9 +621,9 @@ dependencies = [
 
 [[package]]
 name = "cloudformatious"
-version = "0.2.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7fe6e446ff27c581b6ff7d98399228feb955c25497aa0e4a9e740d4e8cddb185"
+checksum = "179ce26694e93e26f0f8551e408010ba15c16b86aaf19e2841bf27ceea438155"
 dependencies = [
  "async-stream",
  "aws-config",
@@ -1291,7 +1291,9 @@ version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3b25af4ef94a8528b41fb49a696e361dc6ef975c782417268072d987ac327964"
 dependencies = [
+ "once_cell",
  "parse-display-derive",
+ "regex",
 ]
 
 [[package]]
