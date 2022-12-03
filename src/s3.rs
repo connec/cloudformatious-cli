@@ -81,7 +81,7 @@ impl Client {
             .body(body.into())
             .bucket(request.bucket)
             .content_length(meta.len().try_into().expect("file is insanely large"))
-            .content_md5(base64::encode(&content_md5.0))
+            .content_md5(base64::encode(content_md5.0))
             .key(&key)
             .send()
             .await
