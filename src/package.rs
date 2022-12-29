@@ -64,7 +64,11 @@ pub struct Target<'y> {
     resource_id: &'y str,
     property: &'static PackageableProperty,
     target: &'y mut YamlValue,
-    path: PathBuf,
+    src: Src,
+}
+
+enum Src {
+    Local(PathBuf),
 }
 
 pub fn targets(template: &mut Template) -> impl Iterator<Item = Target<'_>> + '_ {
@@ -95,7 +99,7 @@ pub fn targets(template: &mut Template) -> impl Iterator<Item = Target<'_>> + '_
             resource_id,
             property,
             target,
-            path,
+            src: Src::Local(path),
         })
     })
 }
@@ -129,7 +133,8 @@ pub async fn process(
 }
 
 async fn package_zip(target: &Target<'_>) -> Result<File, Error> {
-    let metadata = match fs::metadata(&target.path).await {
+    let Src::Local(src) = &target.src;
+    let metadata = match fs::metadata(src).await {
         Ok(metadata) => metadata,
         Err(error) => return upload_err(target, error),
     };
@@ -145,9 +150,9 @@ async fn package_zip(target: &Target<'_>) -> Result<File, Error> {
     let mut writer = ZipFileWriter::new(&mut zip);
 
     let paths = if metadata.is_file() {
-        vec![Ok(target.path.clone())]
+        vec![Ok(src.clone())]
     } else if metadata.is_dir() {
-        let path = target.path.clone();
+        let path = src.clone();
         tokio::task::spawn_blocking(move || scandir(&path))
             .await
             .or_else(|error| upload_err(target, format!("couldn't read: {error}")))?
@@ -159,7 +164,7 @@ async fn package_zip(target: &Target<'_>) -> Result<File, Error> {
         let path = path.or_else(|error| upload_err(target, format!("couldn't read: {error}")))?;
 
         let file_name = path
-            .strip_prefix(&target.path)
+            .strip_prefix(src)
             .expect("file must have file name")
             .to_string_lossy()
             .into_owned();
@@ -231,9 +236,10 @@ fn scandir(path: &Path) -> Vec<io::Result<PathBuf>> {
 }
 
 fn upload_err<T>(target: &Target, error: impl fmt::Display) -> Result<T, Error> {
+    let Src::Local(src) = &target.src;
     Err(Error::other(format!(
         "couldn't upload `{}` for `{}`: {error}",
-        target.path.display(),
+        src.display(),
         target.resource_id
     )))
 }
