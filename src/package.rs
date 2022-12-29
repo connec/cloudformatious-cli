@@ -20,13 +20,27 @@ use crate::{s3, template, Error, Template};
 pub struct PackageableProperty {
     resource_type: &'static str,
     path: &'static [&'static str],
+    strategy: PackageStrategy,
     s3_ref: fn(String, s3::UploadOutput) -> serde_yaml::Value,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum PackageStrategy {
+    Raw,
+    Zip,
 }
 
 const PACKAGEABLE_PROPERTIES: &[PackageableProperty] = &[
     PackageableProperty {
+        resource_type: "AWS::CloudFormation::Stack",
+        path: &["TemplateURL"],
+        strategy: PackageStrategy::Raw,
+        s3_ref: |bucket, upload| format!("https://s3.amazonaws.com/{bucket}/{}", upload.key).into(),
+    },
+    PackageableProperty {
         resource_type: "AWS::Lambda::Function",
         path: &["Code"],
+        strategy: PackageStrategy::Zip,
         s3_ref: |bucket, upload| {
             serde_yaml::Mapping::from_iter([
                 (
@@ -44,6 +58,7 @@ const PACKAGEABLE_PROPERTIES: &[PackageableProperty] = &[
     PackageableProperty {
         resource_type: "AWS::Serverless::Function",
         path: &["CodeUri"],
+        strategy: PackageStrategy::Zip,
         s3_ref: |bucket, upload| {
             serde_yaml::Mapping::from_iter([
                 (
@@ -112,7 +127,10 @@ pub async fn process(
 ) -> Result<(), Error> {
     stream::iter(targets.into_iter().map(Ok::<_, Error>))
         .try_for_each_concurrent(None, |target| async move {
-            let file = package_zip(&target).await?;
+            let file = match target.property.strategy {
+                PackageStrategy::Raw => package_raw(&target).await?,
+                PackageStrategy::Zip => package_zip(&target).await?,
+            };
 
             let upload = client
                 .upload(s3::UploadRequest {
@@ -130,6 +148,22 @@ pub async fn process(
         .await?;
 
     Ok(())
+}
+
+async fn package_raw(target: &Target<'_>) -> Result<File, Error> {
+    let Src::Local(src) = &target.src;
+    let metadata = match fs::metadata(src).await {
+        Ok(metadata) => metadata,
+        Err(error) => return upload_err(target, error),
+    };
+
+    if !metadata.is_file() {
+        return upload_err(target, "only files are allowed");
+    }
+
+    File::open(src)
+        .await
+        .or_else(|error| upload_err(target, error))
 }
 
 async fn package_zip(target: &Target<'_>) -> Result<File, Error> {
