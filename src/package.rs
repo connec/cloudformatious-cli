@@ -154,7 +154,7 @@ async fn package_zip(target: &Target<'_>) -> Result<File, Error> {
         let path = path.or_else(|error| upload_err(target, format!("couldn't read: {error}")))?;
 
         let file_name = path
-            .file_name()
+            .strip_prefix(&target.path)
             .expect("file must have file name")
             .to_string_lossy()
             .into_owned();
