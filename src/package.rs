@@ -1,4 +1,9 @@
-use std::{collections::HashMap, fmt, iter::FromIterator, path::PathBuf};
+use std::{
+    collections::HashMap,
+    fmt,
+    iter::FromIterator,
+    path::{Path, PathBuf},
+};
 
 use async_zip::{write::ZipFileWriter, Compression, ZipEntryBuilder};
 use chrono::{DateTime, Utc};
@@ -143,7 +148,7 @@ async fn package_zip(target: &Target<'_>) -> Result<File, Error> {
         vec![Ok(target.path.clone())]
     } else if metadata.is_dir() {
         let path = target.path.clone();
-        tokio::task::spawn_blocking(|| scandir(path))
+        tokio::task::spawn_blocking(move || scandir(&path))
             .await
             .or_else(|error| upload_err(target, format!("couldn't read: {error}")))?
     } else {
@@ -192,8 +197,8 @@ async fn package_zip(target: &Target<'_>) -> Result<File, Error> {
     Ok(zip)
 }
 
-fn scandir(path: PathBuf) -> Vec<io::Result<PathBuf>> {
-    let entries = match std::fs::read_dir(&path) {
+fn scandir(path: &Path) -> Vec<io::Result<PathBuf>> {
+    let entries = match std::fs::read_dir(path) {
         Ok(entries) => entries,
         Err(error) => return vec![Err(error)],
     };
@@ -216,7 +221,7 @@ fn scandir(path: PathBuf) -> Vec<io::Result<PathBuf>> {
         };
 
         if metadata.is_dir() {
-            paths.extend(scandir(entry_path));
+            paths.extend(scandir(&entry_path));
         } else {
             paths.push(Ok(entry_path));
         }
