@@ -14,15 +14,15 @@ path = "src/main.rs"
 [dependencies]
 async_zip = { version = "0.0.9", default-features = false, features = ["deflate"] }
 atty = "0.2.14"
-aws-config = { version = "0.49.0", default-features = false, features = ["client-hyper", "rt-tokio", "rustls"] }
-aws-sdk-s3 = { version = "0.19", default-features = false, features = ["rt-tokio", "rustls"] }
-aws-types = "0.49.0"
-aws_sso_flow = { version = "0.3.1", default-features = false, features = ["aws-sdk", "rustls"] }
+aws-config = { version = "0.55.3", default-features = false, features = ["client-hyper", "rt-tokio", "rustls"] }
+aws-sdk-s3 = { version = "0.28.0", default-features = false, features = ["rt-tokio", "rustls"] }
+aws-types = "0.55.3"
+aws_sso_flow = { version = "0.4.0", default-features = false, features = ["aws-sdk", "rustls"] }
 base64 = "0.13.0"
 chrono = { version = "0.4.22", default-features = false }
 clap = { version = "4.0.18", features = ["derive", "env"] }
 clap_complete = "4.0.3"
-cloudformatious = "0.5.0"
+cloudformatious = "0.6.0"
 colored = "2.0.0"
 futures-util = "0.3.24"
 hyper = { version = "0.14.20", features = ["stream"] }
