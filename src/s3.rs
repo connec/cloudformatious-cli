@@ -56,7 +56,7 @@ impl Client {
                 let bucket = &request.bucket;
                 let key = &key;
                 move |error| match error {
-                    aws_sdk_s3::types::SdkError::ServiceError { err, .. } if err.is_not_found() => {
+                    aws_sdk_s3::error::SdkError::ServiceError(err) if err.err().is_not_found() => {
                         Ok(false)
                     }
                     error => Err(Error::other(format!(
