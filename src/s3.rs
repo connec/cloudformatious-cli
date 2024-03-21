@@ -87,7 +87,7 @@ impl Client {
             .await
             .map_err(|error| {
                 Error::other(format!(
-                    "an error occurred when uploading package to {key}: {error}",
+                    "an error occurred when uploading package to {key}: {error:#?}",
                 ))
             })?;
 
