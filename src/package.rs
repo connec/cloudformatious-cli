@@ -11,7 +11,7 @@ use futures_util::{stream, TryStreamExt};
 use serde_yaml::Value as YamlValue;
 use tokio::{
     fs::{self, File},
-    io::{self, AsyncSeekExt},
+    io::{self, AsyncSeekExt, AsyncWriteExt, BufWriter},
 };
 
 use crate::{s3, template, Error, Template};
@@ -26,7 +26,7 @@ pub struct PackageableProperty {
 
 #[derive(Clone, Copy, Debug)]
 enum PackageStrategy {
-    Raw,
+    Template,
     Zip,
 }
 
@@ -34,7 +34,7 @@ const PACKAGEABLE_PROPERTIES: &[PackageableProperty] = &[
     PackageableProperty {
         resource_type: "AWS::CloudFormation::Stack",
         path: &["TemplateURL"],
-        strategy: PackageStrategy::Raw,
+        strategy: PackageStrategy::Template,
         s3_ref: |bucket, upload| format!("https://s3.amazonaws.com/{bucket}/{}", upload.key).into(),
     },
     PackageableProperty {
@@ -128,7 +128,9 @@ pub async fn process(
     stream::iter(targets.into_iter().map(Ok::<_, Error>))
         .try_for_each_concurrent(None, |target| async move {
             let file = match target.property.strategy {
-                PackageStrategy::Raw => package_raw(&target).await?,
+                PackageStrategy::Template => {
+                    package_template(client, s3_bucket, s3_prefix, &target).await?
+                }
                 PackageStrategy::Zip => package_zip(&target).await?,
             };
 
@@ -150,20 +152,42 @@ pub async fn process(
     Ok(())
 }
 
-async fn package_raw(target: &Target<'_>) -> Result<File, Error> {
+async fn package_template<'a>(
+    s3_client: &'a s3::Client,
+    s3_bucket: &'a str,
+    s3_prefix: Option<&'a str>,
+    target: &'a Target<'a>,
+) -> Result<File, Error> {
+    // Attempt to load the source as a template
     let Src::Local(src) = &target.src;
-    let metadata = match fs::metadata(src).await {
-        Ok(metadata) => metadata,
-        Err(error) => return upload_err(target, error),
-    };
-
-    if !metadata.is_file() {
-        return upload_err(target, "only files are allowed");
-    }
-
-    File::open(src)
+    let mut template = Template::open(src.clone())
         .await
-        .or_else(|error| upload_err(target, error))
+        .or_else(|error| upload_err(target, error))?;
+
+    // Process the template (recursive)
+    let targets = self::targets(&mut template);
+    self::process(s3_client, s3_bucket, s3_prefix, targets).await?;
+
+    let mut file = tempfile()
+        .await
+        .or_else(|error| upload_err(target, error))?;
+    let mut writer = BufWriter::new(&mut file);
+
+    // We use an `async` block here to achieve something like a `try` block
+    async move {
+        writer.write_all(template.to_string().as_bytes()).await?;
+        writer.flush().await?;
+        writer.rewind().await
+    }
+    .await
+    .or_else(|error| {
+        upload_err(
+            target,
+            format!("failed to write recursively packaged template: {error}"),
+        )
+    })?;
+
+    Ok(file)
 }
 
 async fn package_zip(target: &Target<'_>) -> Result<File, Error> {
@@ -173,14 +197,9 @@ async fn package_zip(target: &Target<'_>) -> Result<File, Error> {
         Err(error) => return upload_err(target, error),
     };
 
-    let mut zip = File::from_std(
-        tokio::task::spawn_blocking(tempfile::tempfile)
-            .await
-            .unwrap_or_else(|error| std::panic::resume_unwind(error.into_panic()))
-            .or_else(|error| {
-                upload_err(target, format!("couldn't create temporary file: {error}"))
-            })?,
-    );
+    let mut zip = tempfile()
+        .await
+        .or_else(|error| upload_err(target, error))?;
     let mut writer = ZipFileWriter::new(&mut zip);
 
     let paths = if metadata.is_file() {
@@ -267,6 +286,14 @@ fn scandir(path: &Path) -> Vec<io::Result<PathBuf>> {
 
         paths
     })
+}
+
+async fn tempfile() -> Result<File, Error> {
+    let file = tokio::task::spawn_blocking(tempfile::tempfile)
+        .await
+        .unwrap_or_else(|error| std::panic::resume_unwind(error.into_panic()))
+        .map_err(|error| Error::other(format!("couldn't create temporary file: {error}")))?;
+    Ok(File::from_std(file))
 }
 
 fn upload_err<T>(target: &Target, error: impl fmt::Display) -> Result<T, Error> {
