@@ -35,7 +35,7 @@ const PACKAGEABLE_PROPERTIES: &[PackageableProperty] = &[
         resource_type: "AWS::CloudFormation::Stack",
         path: &["TemplateURL"],
         strategy: PackageStrategy::Template,
-        s3_ref: |bucket, upload| format!("https://s3.amazonaws.com/{bucket}/{}", upload.key).into(),
+        s3_ref: |_bucket, upload| upload.uri.into(),
     },
     PackageableProperty {
         resource_type: "AWS::Lambda::Function",

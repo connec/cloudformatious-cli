@@ -1,4 +1,8 @@
-use std::{convert::TryInto, path::Path};
+use std::{
+    convert::TryInto,
+    path::Path,
+    sync::{Arc, Mutex},
+};
 
 use aws_sdk_s3::primitives::ByteStream;
 use aws_types::region::Region;
@@ -45,11 +49,19 @@ impl Client {
             .to_string_lossy()
             .into_owned();
 
+        let uri: Arc<Mutex<Option<String>>> = Default::default();
         let exists = self
             .inner
             .head_object()
             .bucket(request.bucket)
             .key(&key)
+            .customize()
+            .mutate_request({
+                let uri = uri.clone();
+                move |req| {
+                    *uri.lock().unwrap() = Some(req.uri().to_owned());
+                }
+            })
             .send()
             .await
             .map(|_| true)
@@ -65,8 +77,13 @@ impl Client {
                     ))),
                 }
             })?;
+        let uri = uri
+            .lock()
+            .unwrap()
+            .take()
+            .expect("BUG: uri not set after request");
         if exists {
-            return Ok(UploadOutput { key });
+            return Ok(UploadOutput { uri, key });
         }
 
         let mut file = reader.into_inner().into_inner();
@@ -92,7 +109,7 @@ impl Client {
                 ))
             })?;
 
-        Ok(UploadOutput { key })
+        Ok(UploadOutput { uri, key })
     }
 }
 
@@ -105,5 +122,6 @@ pub struct UploadRequest<'a> {
 
 #[derive(Debug)]
 pub struct UploadOutput {
+    pub uri: String,
     pub key: String,
 }
