@@ -1,4 +1,4 @@
-use std::iter;
+use std::{borrow::Cow, iter};
 
 use cloudformatious::{change_set::ChangeSet, StackEvent, StackStatus, StatusSentiment};
 use colored::{ColoredString, Colorize};
@@ -49,11 +49,16 @@ impl Default for Sizing {
 
 pub async fn print_events(sizing: &Sizing, mut events: impl Stream<Item = StackEvent> + Unpin) {
     while let Some(event) = events.next().await {
+        let logical_resource_id: Cow<'_, _> = if let Some(stack_alias) = event.stack_alias() {
+            [stack_alias, event.logical_resource_id()].join("/").into()
+        } else {
+            event.logical_resource_id().into()
+        };
         eprintln!(
             "{:?} {:resource_status_size$} {:logical_resource_id_size$} {:resource_type_size$} {}",
             event.timestamp(),
             colorize_status(&event),
-            event.logical_resource_id(),
+            logical_resource_id,
             event.resource_type(),
             event.resource_status_reason().unwrap_or("").bright_black(),
             resource_status_size = sizing.resource_status,
