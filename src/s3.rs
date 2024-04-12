@@ -1,5 +1,6 @@
 use std::{convert::TryInto, path::Path};
 
+use aws_sdk_s3::primitives::ByteStream;
 use aws_types::region::Region;
 use futures_util::{StreamExt, TryStreamExt};
 use tokio::{
@@ -78,7 +79,7 @@ impl Client {
 
         self.inner
             .put_object()
-            .body(body.into())
+            .body(ByteStream::from_body_0_4(body))
             .bucket(request.bucket)
             .content_length(meta.len().try_into().expect("file is insanely large"))
             .content_md5(base64::encode(content_md5.0))
