@@ -805,7 +805,7 @@ dependencies = [
 
 [[package]]
 name = "cloudformatious-cli"
-version = "0.6.0-pre.1"
+version = "0.6.0"
 dependencies = [
  "async_zip",
  "atty",
