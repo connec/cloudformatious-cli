@@ -20,7 +20,7 @@ use self::{error::Error, template::Template};
 ///
 /// Use `cloudformatious <command> --help` to get more information about individual commands.
 #[derive(Parser, Debug)]
-#[clap(name = "cloudformatious")]
+#[clap(name = "cloudformatious", version)]
 struct Args {
     /// The region to use. Overrides config/env settings.
     #[clap(long, env = "AWS_REGION", value_parser = parse_region)]
