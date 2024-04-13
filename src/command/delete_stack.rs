@@ -80,7 +80,7 @@ impl TryFrom<Args> for DeleteStackInput {
 pub async fn main(region: Option<Region>, args: Args) -> Result<(), Error> {
     let quiet = args.quiet;
 
-    let config = get_config(region).await;
+    let config = get_config(region).await?;
     let client = cloudformatious::Client::new(&config);
     let mut delete = client.delete_stack(args.try_into()?);
     let sizing = Sizing::default();

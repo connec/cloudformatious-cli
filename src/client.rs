@@ -1,9 +1,12 @@
 use std::fmt;
 
 use aws_config::{meta::credentials::CredentialsProviderChain, SdkConfig};
+use aws_sdk_s3::config::ProvideCredentials;
 use aws_types::region::Region;
 
-pub async fn get_config(region: Option<Region>) -> SdkConfig {
+use crate::Error;
+
+pub async fn get_config(region: Option<Region>) -> Result<SdkConfig, Error> {
     let sso = aws_sso_flow::SsoFlow::builder().verification_prompt(|url| async move {
         if atty::is(atty::Stream::Stdin) && atty::is(atty::Stream::Stdout) {
             eprintln!("Using SSO an profile – go to {url} to authenticate");
@@ -16,17 +19,28 @@ pub async fn get_config(region: Option<Region>) -> SdkConfig {
         .or_default_provider()
         .await;
 
-    let mut config = aws_config::from_env().credentials_provider(credentials);
+    // Pre-warm the credentials. This ensures any interaction required by aws-sso-flow doesn't
+    // interrupt connections.
+    credentials
+        .provide_credentials()
+        .await
+        .map_err(Error::other)?;
+
+    let mut loader = aws_config::from_env().credentials_provider(credentials);
     if let Some(region) = region {
-        config = config.region(region);
+        loader = loader.region(region);
     }
 
-    config.load().await
+    let config = loader.load().await;
+    Ok(config)
 }
 
-pub async fn get_client<C>(ctor: impl FnOnce(&SdkConfig) -> C, region: Option<Region>) -> C {
-    let config = get_config(region).await;
-    ctor(&config)
+pub async fn get_client<C>(
+    ctor: impl FnOnce(&SdkConfig) -> C,
+    region: Option<Region>,
+) -> Result<C, Error> {
+    let config = get_config(region).await?;
+    Ok(ctor(&config))
 }
 
 #[derive(Debug)]

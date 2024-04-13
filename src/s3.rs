@@ -20,9 +20,9 @@ pub struct Client {
 }
 
 impl Client {
-    pub async fn new(region: Option<Region>) -> Self {
-        let inner = get_client(aws_sdk_s3::Client::new, region).await;
-        Self { inner }
+    pub async fn new(region: Option<Region>) -> Result<Self, Error> {
+        let inner = get_client(aws_sdk_s3::Client::new, region).await?;
+        Ok(Self { inner })
     }
 
     pub async fn upload<'a>(&self, request: UploadRequest<'a>) -> Result<UploadOutput, Error> {

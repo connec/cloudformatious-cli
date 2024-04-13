@@ -134,7 +134,7 @@ pub async fn main(region: Option<Region>, args: Args) -> Result<(), Error> {
     let mut template = Template::open(args.template_path.clone()).await?;
     preprocess(region.as_ref(), &args, &mut template).await?;
 
-    let config = get_config(region).await;
+    let config = get_config(region).await?;
     let client = cloudformatious::Client::new(&config);
     let input = args.into_input(&template);
     let mut apply = client.apply_stack(input.clone());
@@ -215,7 +215,7 @@ async fn preprocess(
         )));
     };
 
-    let client = s3::Client::new(region.cloned()).await;
+    let client = s3::Client::new(region.cloned()).await?;
 
     package::process(
         &client,
