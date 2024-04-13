@@ -17,9 +17,9 @@ jobs:
   fetch:
     runs-on: ubuntu-20.04
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - name: Cargo cache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           key: ${{ hashFiles('Cargo.lock') }}
           path: |
@@ -37,9 +37,9 @@ jobs:
     runs-on: ubuntu-20.04
     needs: [fetch]
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - name: Cargo cache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           key: ${{ hashFiles('Cargo.lock') }}
           path: |
@@ -49,7 +49,7 @@ jobs:
             ~/.cargo/registry/index
             Cargo.lock
       - name: Check cache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           key: check-${{ hashFiles('Cargo.lock') }}
           path: target
@@ -60,9 +60,9 @@ jobs:
     runs-on: ubuntu-20.04
     needs: [check]
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - name: Cargo cache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           key: ${{ hashFiles('Cargo.lock') }}
           path: |
@@ -72,7 +72,7 @@ jobs:
             ~/.cargo/registry/index
             Cargo.lock
       - name: Check cache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           key: check-${{ hashFiles('Cargo.lock') }}
           path: target
@@ -83,9 +83,9 @@ jobs:
     runs-on: ubuntu-20.04
     needs: [check]
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - name: Cargo cache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           key: ${{ hashFiles('Cargo.lock') }}
           path: |
@@ -95,7 +95,7 @@ jobs:
             ~/.cargo/registry/index
             Cargo.lock
       - name: Check cache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           key: check-${{ hashFiles('Cargo.lock') }}
           path: target
@@ -106,9 +106,9 @@ jobs:
     runs-on: ubuntu-20.04
     needs: [fetch]
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - name: Cargo cache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           key: ${{ hashFiles('Cargo.lock') }}
           path: |
@@ -118,7 +118,7 @@ jobs:
             ~/.cargo/registry/index
             Cargo.lock
       - name: Test cache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           key: test-${{ hashFiles('Cargo.lock') }}
           path: target
