@@ -18,109 +18,32 @@ jobs:
     runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v4
-      - name: Cargo cache
-        uses: actions/cache@v4
-        with:
-          key: ${{ hashFiles('Cargo.lock') }}
-          path: |
-            ~/.cargo/bin
-            ~/.cargo/git/db
-            ~/.cargo/registry/cache
-            ~/.cargo/registry/index
-            Cargo.lock
+      - uses: swatinem/rust-cache@v2
       - name: Fetch
         run: cargo fetch
       - name: Check Cargo.lock is up to date
         run: git diff --exit-code || (echo 'Cargo.lock needs updated' && exit 1)
 
-  check:
-    runs-on: ubuntu-20.04
-    needs: [fetch]
-    steps:
-      - uses: actions/checkout@v4
-      - name: Cargo cache
-        uses: actions/cache@v4
-        with:
-          key: ${{ hashFiles('Cargo.lock') }}
-          path: |
-            ~/.cargo/bin
-            ~/.cargo/git/db
-            ~/.cargo/registry/cache
-            ~/.cargo/registry/index
-            Cargo.lock
-      - name: Check cache
-        uses: actions/cache@v4
-        with:
-          key: check-${{ hashFiles('Cargo.lock') }}
-          path: target
-      - name: Check
-        run: cargo check --all-targets --locked
-
   clippy:
     runs-on: ubuntu-20.04
-    needs: [check]
     steps:
       - uses: actions/checkout@v4
-      - name: Cargo cache
-        uses: actions/cache@v4
-        with:
-          key: ${{ hashFiles('Cargo.lock') }}
-          path: |
-            ~/.cargo/bin
-            ~/.cargo/git/db
-            ~/.cargo/registry/cache
-            ~/.cargo/registry/index
-            Cargo.lock
-      - name: Check cache
-        uses: actions/cache@v4
-        with:
-          key: check-${{ hashFiles('Cargo.lock') }}
-          path: target
-      - name: Clippy
+      - uses: swatinem/rust-cache@v2
+      - name: Check
         run: cargo clippy --all-targets --locked
 
   doc-check:
     runs-on: ubuntu-20.04
-    needs: [check]
     steps:
       - uses: actions/checkout@v4
-      - name: Cargo cache
-        uses: actions/cache@v4
-        with:
-          key: ${{ hashFiles('Cargo.lock') }}
-          path: |
-            ~/.cargo/bin
-            ~/.cargo/git/db
-            ~/.cargo/registry/cache
-            ~/.cargo/registry/index
-            Cargo.lock
-      - name: Check cache
-        uses: actions/cache@v4
-        with:
-          key: check-${{ hashFiles('Cargo.lock') }}
-          path: target
+      - uses: swatinem/rust-cache@v2
       - name: Doc check
         run: cargo doc --no-deps --locked
 
   test:
     runs-on: ubuntu-20.04
-    needs: [fetch]
     steps:
       - uses: actions/checkout@v4
-      - name: Cargo cache
-        uses: actions/cache@v4
-        with:
-          key: ${{ hashFiles('Cargo.lock') }}
-          path: |
-            ~/.cargo/bin
-            ~/.cargo/git/db
-            ~/.cargo/registry/cache
-            ~/.cargo/registry/index
-            Cargo.lock
-      - name: Test cache
-        uses: actions/cache@v4
-        with:
-          key: test-${{ hashFiles('Cargo.lock') }}
-          path: target
+      - uses: swatinem/rust-cache@v2
       - name: Test
         run: cargo test --locked
