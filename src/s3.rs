@@ -25,7 +25,7 @@ impl Client {
         Ok(Self { inner })
     }
 
-    pub async fn upload<'a>(&self, request: UploadRequest<'a>) -> Result<UploadOutput, Error> {
+    pub async fn upload(&self, request: UploadRequest<'_>) -> Result<UploadOutput, Error> {
         let meta = request
             .file
             .metadata()
