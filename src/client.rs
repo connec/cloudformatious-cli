@@ -6,13 +6,13 @@ use aws_types::region::Region;
 
 use crate::Error;
 
-pub async fn get_config(region: Option<Region>) -> Result<SdkConfig, Error> {
-    let sso = aws_sso_flow::SsoFlow::builder().verification_prompt(|url| async move {
-        if atty::is(atty::Stream::Stdin) && atty::is(atty::Stream::Stdout) {
+pub async fn get_config(region: Option<Region>, no_input: bool) -> Result<SdkConfig, Error> {
+    let sso = aws_sso_flow::SsoFlow::builder().verification_prompt(move |url| async move {
+        if no_input {
+            Err(NonInteractiveSsoError)
+        } else {
             eprintln!("Using SSO an profile – go to {url} to authenticate");
             Ok(())
-        } else {
-            Err(NonInteractiveSsoError)
         }
     });
     let credentials = CredentialsProviderChain::first_try("SsoFlow", sso)
@@ -38,8 +38,9 @@ pub async fn get_config(region: Option<Region>) -> Result<SdkConfig, Error> {
 pub async fn get_client<C>(
     ctor: impl FnOnce(&SdkConfig) -> C,
     region: Option<Region>,
+    no_input: bool,
 ) -> Result<C, Error> {
-    let config = get_config(region).await?;
+    let config = get_config(region, no_input).await?;
     Ok(ctor(&config))
 }
 
