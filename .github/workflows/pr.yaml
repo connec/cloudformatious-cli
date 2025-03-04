@@ -15,7 +15,7 @@ env:
 
 jobs:
   fetch:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: swatinem/rust-cache@v2
@@ -25,7 +25,7 @@ jobs:
         run: git diff --exit-code || (echo 'Cargo.lock needs updated' && exit 1)
 
   clippy:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: swatinem/rust-cache@v2
@@ -33,7 +33,7 @@ jobs:
         run: cargo clippy --all-targets --locked
 
   doc-check:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: swatinem/rust-cache@v2
@@ -41,7 +41,7 @@ jobs:
         run: cargo doc --no-deps --locked
 
   test:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: swatinem/rust-cache@v2
