@@ -20,8 +20,8 @@ pub struct Client {
 }
 
 impl Client {
-    pub async fn new(region: Option<Region>) -> Result<Self, Error> {
-        let inner = get_client(aws_sdk_s3::Client::new, region).await?;
+    pub async fn new(region: Option<Region>, no_input: bool) -> Result<Self, Error> {
+        let inner = get_client(aws_sdk_s3::Client::new, region, no_input).await?;
         Ok(Self { inner })
     }
 

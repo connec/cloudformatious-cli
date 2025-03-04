@@ -59,6 +59,13 @@ pub struct Args {
     #[clap(long)]
     client_request_token: Option<String>,
 
+    /// A flag to indicate that no input can be obtained.
+    ///
+    /// For example, this will cause the operation to fail if SSO authentication is configured and
+    /// not refereshed.
+    #[clap(long, default_value_t)]
+    no_input: bool,
+
     /// The Simple Notification Service (SNS) topic ARNs to publish stack related events.
     #[clap(long, num_args(1..))]
     notification_arns: Vec<String>,
@@ -134,7 +141,7 @@ pub async fn main(region: Option<Region>, args: Args) -> Result<(), Error> {
     let mut template = Template::open(args.template_path.clone()).await?;
     preprocess(region.as_ref(), &args, &mut template).await?;
 
-    let config = get_config(region).await?;
+    let config = get_config(region, args.no_input).await?;
     let client = cloudformatious::Client::new(&config);
     let input = args.into_input(&template);
     let mut apply = client.apply_stack(input.clone());
@@ -215,7 +222,7 @@ async fn preprocess(
         )));
     };
 
-    let client = s3::Client::new(region.cloned()).await?;
+    let client = s3::Client::new(region.cloned(), args.no_input).await?;
 
     package::process(
         &client,

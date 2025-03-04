@@ -41,6 +41,13 @@ pub struct Args {
     #[clap(long)]
     client_request_token: Option<String>,
 
+    /// A flag to indicate that no input can be obtained.
+    ///
+    /// For example, this will cause the operation to fail if SSO authentication is configured and
+    /// not refereshed.
+    #[clap(long, default_value_t)]
+    no_input: bool,
+
     /// Disable informational output to STDERR.
     #[clap(long)]
     quiet: bool,
@@ -80,7 +87,7 @@ impl TryFrom<Args> for DeleteStackInput {
 pub async fn main(region: Option<Region>, args: Args) -> Result<(), Error> {
     let quiet = args.quiet;
 
-    let config = get_config(region).await?;
+    let config = get_config(region, args.no_input).await?;
     let client = cloudformatious::Client::new(&config);
     let mut delete = client.delete_stack(args.try_into()?);
     let sizing = Sizing::default();

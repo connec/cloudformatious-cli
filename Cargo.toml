@@ -13,7 +13,6 @@ path = "src/main.rs"
 
 [dependencies]
 async_zip = { version = "0.0.9", default-features = false, features = ["deflate"] }
-atty = "0.2.14"
 aws-config = "1.1.10"
 aws-credential-types = "1.2.0"
 aws-sdk-s3 = "1.22.0"
