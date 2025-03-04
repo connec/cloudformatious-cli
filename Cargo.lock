@@ -794,7 +794,7 @@ dependencies = [
 
 [[package]]
 name = "cloudformatious-cli"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "async_zip",
  "aws-config",
