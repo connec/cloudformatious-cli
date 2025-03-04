@@ -62,7 +62,14 @@ impl fmt::Display for Error {
 
                 Ok(())
             }
-            Self::Other(error) => error.fmt(f),
+            Self::Other(error) => {
+                write!(f, "{}", error)?;
+                let chain = std::iter::successors(error.source(), |error| error.source());
+                for error in chain {
+                    write!(f, ": {}", error)?;
+                }
+                Ok(())
+            }
         }
     }
 }
